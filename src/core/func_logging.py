@@ -25,8 +25,10 @@ class AndroidLogManager:
         # 기본 저장 경로 설정
         if folder_path is None:
             folder_path = self.config.get('local_path', './')
-        self.log_dir = os.path.join(folder_path, "logs")
+        self.folder_path = folder_path
+        self.log_dir = os.path.join(self.folder_path, "logs")
         os.makedirs(self.log_dir, exist_ok=True)
+
 
         # 실시간 수집 상태 관리 변수
         self.file_count = 0
@@ -129,8 +131,11 @@ class AndroidLogManager:
         finally:
             logging.info(f"[{self.serial}] 로그 수집 쓰레드 최종 종료")
 
+
+
+    """
     def _live_log_stream_handler(self, connection, debounce_time):
-        """소켓 스트림으로부터 바이너리 데이터를 받아 파일 처리 및 필터링을 수행합니다."""
+        //소켓 스트림으로부터 바이너리 데이터를 받아 파일 처리 및 필터링을 수행합니다.
         is_snapshot_enabled = self.config.get('snapshop_log', False) 
         filter_keywords = self.config.get('log_filter', [])
         is_filter_active = is_snapshot_enabled and isinstance(filter_keywords, list) and len(filter_keywords) > 0
@@ -207,6 +212,101 @@ class AndroidLogManager:
             logging.error(f"[{self.serial}] 핸들러 실행 중 오류: {e}")
         finally:
             connection.close()
+    """
+
+    def _live_log_stream_handler(self, connection, debounce_time):
+        """소켓 스트림으로부터 바이너리 데이터를 받아 파일 처리 및 필터링을 수행합니다."""
+        is_snapshot_enabled = self.config.get('snapshop_log', False) 
+        filter_keywords = self.config.get('log_filter', [])
+        is_filter_active = is_snapshot_enabled and isinstance(filter_keywords, list) and len(filter_keywords) > 0
+
+        # 변경된 Dict 형태의 log_screenshot_filter 로드
+        # 예: {"LLN_off": "_onLLNViewModeChanged {\"isLLNViewMode\":false"}
+        screenshot_filters = self.config.get('log_screenshot_filter', {})
+        is_screenshot_filter_active = isinstance(screenshot_filters, dict) and len(screenshot_filters) > 0
+
+        try:
+            with ExitStack() as stack:
+                # 1. 파일 오픈
+                f = stack.enter_context(open(self.current_log_path, "w", encoding="utf-8", buffering=1024*1024))
+                f_filter = None
+                if is_filter_active:
+                    f_filter = stack.enter_context(open(self.current_filter_path, "w", encoding="utf-8"))
+                    f_filter.write(f"=== Filter Active: {filter_keywords} ===\n\n")
+
+                # 2. 이전 파일 문맥 기록
+                if self.overlap_lines:
+                    f.write("\n" + "="*50 + "\n=== Previous Context ===\n")
+                    f.writelines(self.overlap_lines)
+                    f.write("="*50 + "\n\n")
+
+                # 3. 데이터 읽기 루프
+                while not self.stop_event.is_set():
+                    chunk = connection.read(8192)  # 8KB씩 읽기
+                    if not chunk:
+                        return  # 스트림 끊김 시 리턴
+                    
+                    text = chunk.decode('utf-8', errors='replace')
+                    f.write(text)
+                    
+                    # 줄 단위 분할 및 필터링 검사
+                    if (is_filter_active and f_filter) or is_screenshot_filter_active:
+                        for line in text.splitlines():
+                            line_upper = line.upper()
+                            
+                            # [기존] 일반 로그 텍스트 필터 저장
+                            if is_filter_active and f_filter:
+                                if any(word.upper() in line_upper for word in filter_keywords):
+                                    f_filter.write(line + "\n")
+                            
+                            # [수정] 스크린샷 캡처 필터 감지 (Dict Key/Value 파싱)
+                            if is_screenshot_filter_active:
+                                for folder_name, keywords in screenshot_filters.items():
+                                    # keywords가 단일 문자열일 경우 리스트화, 리스트면 그대로 사용
+                                    target_keywords = keywords if isinstance(keywords, list) else [keywords]
+                                    
+                                    # Value(키워드)들 중 하나라도 로그에 들어있는지 확인
+                                    if any(kw.upper() in line_upper for kw in target_keywords):
+                                        current_time = time.time()
+                                        
+                                        if current_time - self.last_screenshot_time >= debounce_time:
+                                            self.last_screenshot_time = current_time
+                                            logging.info(f"📸 [{self.serial}] [{folder_name} 조건 충족 - 캡처 실행]: {line.strip()}")
+                                            
+                                            try:
+                                                # 매칭된 folder_name (예: 'LLN_off')으로 저장 경로 설정
+                                                target_save_dir = os.path.join(self.folder_path, folder_name)
+                                                os.makedirs(self.folder_path, exist_ok=True)
+                                                
+                                                # record_screenshot 호출 (save_dir 인자 전달)
+                                                func_record_image.record_screenshot(
+                                                    device=self.device, 
+                                                    save_dir=self.folder_path
+                                                )
+                                            except Exception as screenshot_err:
+                                                logging.error(f"스크린샷 캡처 중 오류 발생: {screenshot_err}")
+                                        else:
+                                            remaining = debounce_time - (current_time - self.last_screenshot_time)
+                                            logging.debug(f"⏳ [디바운스 중] 스크린샷 무시됨 (남은 시간: {remaining:.1f}초): {line.strip()}")
+
+                    if is_filter_active and f_filter:
+                        f_filter.flush()
+
+                    # 100MB 용량 체크 및 파일 로테이션
+                    if os.path.getsize(self.current_log_path) > 100 * 1024 * 1024:
+                        f.flush()
+                        break 
+
+            self._update_overlap_context()
+            self.file_count += 1
+            self._update_paths()
+            return 
+
+        except Exception as e:
+            logging.error(f"[{self.serial}] 핸들러 실행 중 오류: {e}")
+        finally:
+            connection.close()
+
 
     def get_snapshot_logs(self, folder_path=None, duration_sec=3):
         """
@@ -370,178 +470,36 @@ class AndroidLogManager:
 config = configus.load_config('resources/configs/config.json')
 # ================================== logging. ==================================
 
-def call_logs_before(device, folder_path=None):
-    """
-    ppadb 객체와 handler를 이용한 실시간 로그 수집 및 100MB 단위 분할 저장
-    """
-    device_obj = device['ppadb_device'] # ppadb 객체 추출
-    if folder_path is None:
-        # config 변수는 외부에서 정의되어 있다고 가정합니다.
-        folder_path = config.get('local_path', './')
-        
-    log_dir = os.path.join(folder_path, "logs")
-    os.makedirs(log_dir, exist_ok=True)
-
-    # 1. 로그 버퍼 사이즈 확대
-    try:
-        device_obj.shell("logcat -G 100M")
-    except Exception as e:
-        logging.info(f"로그 버퍼 설정 실패: {e}")
-
-    is_snapshot_enabled = config.get('snapshop_log', False) 
-    filter_keywords = config.get('log_filter', [])
-    is_filter_active = is_snapshot_enabled and isinstance(filter_keywords, list) and len(filter_keywords) > 0
-
-    def log_worker(stop_event):
-        # 변수 초기화
-        state = {
-            'file_count': 0,
-            'overlap_lines': [],
-            'current_log_path': "",
-            'current_filter_path': ""
-        }
-
-        def update_paths():
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            suffix = f"_{state['file_count']}" if state['file_count'] > 0 else ""
-            state['current_log_path'] = os.path.join(log_dir, f"log_{timestamp}{suffix}.txt")
-            state['current_filter_path'] = os.path.join(log_dir, f"log_{timestamp}{suffix}_filtered.txt")
-
-        # 최초 경로 설정
-        update_paths()
-
-        # [핵심] 실시간 로그 데이터를 처리할 핸들러
-        def log_handler(connection):
-            try:
-                while not stop_event.is_set():
-                    with ExitStack() as stack:
-                        # 1. 파일 오픈
-                        f = stack.enter_context(open(state['current_log_path'], "w", encoding="utf-8", buffering=1024*1024))
-                        f_filter = None
-                        if is_filter_active:
-                            f_filter = stack.enter_context(open(state['current_filter_path'], "w", encoding="utf-8"))
-                            f_filter.write(f"=== Filter Active: {filter_keywords} ===\n\n")
-
-                        # 2. 이전 파일 문맥 기록
-                        if state['overlap_lines']:
-                            f.write("\n" + "="*50 + "\n=== Previous Context ===\n")
-                            f.writelines(state['overlap_lines'])
-                            f.write("="*50 + "\n\n")
-
-                        # 3. 소켓으로부터 데이터 읽기 루프
-                        line_counter = 0
-                        
-                        # connection.read()는 데이터를 덩어리(chunk)로 가져옵니다.
-                        while not stop_event.is_set():
-                            chunk = connection.read(8192) # 8KB씩 읽기
-                            if not chunk:
-                                break
-                            
-                            text = chunk.decode('utf-8', errors='replace')
-                            f.write(text)
-                            
-                            # 필터링 처리 (줄 단위로 쪼개서 검사)
-                            if is_filter_active and f_filter:
-                                for line in text.splitlines():
-                                    if any(word.upper() in line.upper() for word in filter_keywords):
-                                        f_filter.write(line + "\n")
-                                f_filter.flush()
-
-                            # 100MB 용량 체크 및 파일 로테이션
-                            if os.path.getsize(state['current_log_path']) > 100 * 1024 * 1024:
-                                # Overlap 추출 후 루프 탈출하여 새 파일 생성
-                                f.flush()
-                                break 
-
-                        # 4. 루프를 빠져나왔다면(파일 교체 시점), 오버랩 데이터 갱신
-                        try:
-                            with open(state['current_log_path'], "r", encoding="utf-8", errors="replace") as rf:
-                                lines = rf.readlines()
-                                state['overlap_lines'] = lines[-10:] if len(lines) >= 10 else lines
-                        except:
-                            state['overlap_lines'] = []
-
-                        state['file_count'] += 1
-                        update_paths()
-                        
-                        # 파일 용량 때문에 break 된 거라면 핸들러 안에서 계속 돌아야 하지만, 
-                        # logcat 명령 자체가 다시 실행되어야 하므로 핸들러를 종료하고 
-                        # 밖의 while 루프에서 device.shell을 재호출하게 유도합니다.
-                        return 
-
-            except Exception as e:
-                logging.error(f"핸들러 실행 중 오류: {e}")
-            finally:
-                connection.close()
-
-        # 메인 루프: 핸들러가 종료되면(파일 로테이션 등) 다시 실행
-        try:
-            while not stop_event.is_set():
-                # handler 방식으로 실행 (이 명령은 핸들러가 return될 때까지 블로킹됩니다)
-                device_obj.shell("logcat -v threadtime", handler=log_handler)
-                
-                # 만약 파일 용량 때문에 return 된 게 아니라 stop_event 때문이라면 종료
-                if stop_event.is_set():
-                    break
-                    
-                logging.info(f"[{device_obj.serial}] 로그 파일 교체 및 수집 재시작...")
-                
-        except Exception as e:
-            logging.error(f"로그 수집 워커 에러: {e}")
-        finally:
-            logging.info(f"[{device_obj.serial}] 로그 수집 쓰레드 최종 종료")
-
-    # 스레드 시작
-    stop_event = threading.Event()
-    log_thread = threading.Thread(target=log_worker, args=(stop_event,), daemon=True)
-    log_thread.start()
-
-    logging.info(f"[*] 로그 수집 시작 (필터링 활성: {is_filter_active})")
-    return stop_event
-
 def call_logs(device, folder_path=None):
-    """
-    ppadb 객체와 handler를 이용한 실시간 로그 수집 및 100MB 단위 분할 저장
-    
-    :param DEBOUNCE_TIME: 스크린샷 연속 캡처를 방지하는 대기 시간 (단위: 초)
-    """
-    # ---------------------------------------------------------------------
-    # 수정 가능한 설정 변수 (수정 필요 시 여기만 바꾸세요)
-    # ---------------------------------------------------------------------
-    DEBOUNCE_TIME = 3.0  # *초 동안 동일 명령 무시
-    # ---------------------------------------------------------------------
-
+    DEBOUNCE_TIME = 3.0  
     device_obj = device['ppadb_device'] 
+    
     if folder_path is None:
         folder_path = config.get('local_path', './')
         
     log_dir = os.path.join(folder_path, "logs")
     os.makedirs(log_dir, exist_ok=True)
 
-    # 1. 로그 버퍼 사이즈 확대
     try:
         device_obj.shell("logcat -G 100M")
     except Exception as e:
         logging.info(f"로그 버퍼 설정 실패: {e}")
 
-    # --- [필터 설정 로드 섹션] ---
     is_snapshot_enabled = config.get('snapshop_log', False) 
-    
     filter_keywords = config.get('log_filter', [])
     is_filter_active = is_snapshot_enabled and isinstance(filter_keywords, list) and len(filter_keywords) > 0
 
-    screenshot_keywords = config.get('log_screenshot_filter', [])
-    is_screenshot_filter_active = isinstance(screenshot_keywords, list) and len(screenshot_keywords) > 0
-    # ----------------------------
+    # 변경된 Dict 구조 로드
+    screenshot_filters = config.get('log_screenshot_filter', {})
+    is_screenshot_filter_active = isinstance(screenshot_filters, dict) and len(screenshot_filters) > 0
 
     def log_worker(stop_event):
-        # 변수 초기화
         state = {
             'file_count': 0,
             'overlap_lines': [],
             'current_log_path': "",
             'current_filter_path': "",
-            'last_screenshot_time': 0.0  # 마지막 스크린샷 타임스탬프
+            'last_screenshot_time': 0.0
         }
 
         def update_paths():
@@ -550,28 +508,23 @@ def call_logs(device, folder_path=None):
             state['current_log_path'] = os.path.join(log_dir, f"log_{timestamp}{suffix}.txt")
             state['current_filter_path'] = os.path.join(log_dir, f"log_{timestamp}{suffix}_filtered.txt")
 
-        # 최초 경로 설정
         update_paths()
 
-        # 실시간 로그 데이터를 처리할 핸들러
         def log_handler(connection):
             try:
                 while not stop_event.is_set():
                     with ExitStack() as stack:
-                        # 1. 파일 오픈
                         f = stack.enter_context(open(state['current_log_path'], "w", encoding="utf-8", buffering=1024*1024))
                         f_filter = None
                         if is_filter_active:
                             f_filter = stack.enter_context(open(state['current_filter_path'], "w", encoding="utf-8"))
                             f_filter.write(f"=== Filter Active: {filter_keywords} ===\n\n")
 
-                        # 2. 이전 파일 문맥 기록
                         if state['overlap_lines']:
                             f.write("\n" + "="*50 + "\n=== Previous Context ===\n")
                             f.writelines(state['overlap_lines'])
                             f.write("="*50 + "\n\n")
 
-                        # 3. 소켓으로부터 데이터 읽기 루프
                         while not stop_event.is_set():
                             chunk = connection.read(8192) 
                             if not chunk:
@@ -580,43 +533,46 @@ def call_logs(device, folder_path=None):
                             text = chunk.decode('utf-8', errors='replace')
                             f.write(text)
                             
-                            # 줄 단위 분할 및 필터링 검사 처리
                             if (is_filter_active and f_filter) or is_screenshot_filter_active:
                                 for line in text.splitlines():
                                     line_upper = line.upper()
                                     
-                                    # [기존 기능] 일반 로그 텍스트 필터 저장
                                     if is_filter_active and f_filter:
                                         if any(word.upper() in line_upper for word in filter_keywords):
                                             f_filter.write(line + "\n")
                                     
-                                    # [신규 기능] 스크린샷 캡처 필터 감지 (설정된 DEBOUNCE_TIME 적용)
+                                    # Dict 필터 순회
                                     if is_screenshot_filter_active:
-                                        if any(word.upper() in line_upper for word in screenshot_keywords):
-                                            current_time = time.time()
+                                        for folder_name, keywords in screenshot_filters.items():
+                                            target_keywords = keywords if isinstance(keywords, list) else [keywords]
                                             
-                                            # 마지막 캡처 시점으로부터 설정한 시간(DEBOUNCE_TIME)이 지났는지 검사
-                                            if current_time - state['last_screenshot_time'] >= DEBOUNCE_TIME:
-                                                state['last_screenshot_time'] = current_time  # 시각 업데이트
-                                                logging.info(f"📸 [스크린샷 조건 충족 - 캡처 실행]: {line.strip()}")
-                                                try:
-                                                    func_record_image.record_screenshot(device)
-                                                except Exception as screenshot_err:
-                                                    logging.error(f"스크린샷 캡처 중 오류 발생: {screenshot_err}")
-                                            else:
-                                                # 설정 시간 이내에 연속으로 들어온 로그는 무시
-                                                remaining = DEBOUNCE_TIME - (current_time - state['last_screenshot_time'])
-                                                logging.debug(f"⏳ [디바운스 중] 스크린샷 무시됨 (남은 시간: {remaining:.1f}초): {line.strip()}")
+                                            if any(kw.upper() in line_upper for kw in target_keywords):
+                                                current_time = time.time()
+                                                
+                                                if current_time - state['last_screenshot_time'] >= DEBOUNCE_TIME:
+                                                    state['last_screenshot_time'] = current_time
+                                                    logging.info(f"📸 [{folder_name} 조건 충족 - 캡처 실행]: {line.strip()}")
+                                                    try:
+                                                        target_save_dir = os.path.join(folder_path, folder_name)
+                                                        os.makedirs(target_save_dir, exist_ok=True)
+                                                        
+                                                        func_record_image.record_screenshot(
+                                                            device, 
+                                                            save_dir=target_save_dir
+                                                        )
+                                                    except Exception as screenshot_err:
+                                                        logging.error(f"스크린샷 캡처 중 오류 발생: {screenshot_err}")
+                                                else:
+                                                    remaining = DEBOUNCE_TIME - (current_time - state['last_screenshot_time'])
+                                                    logging.debug(f"⏳ [디바운스 중] 스크린샷 무시됨 (남은 시간: {remaining:.1f}초): {line.strip()}")
 
                                 if is_filter_active and f_filter:
                                     f_filter.flush()
 
-                            # 100MB 용량 체크 및 파일 로테이션
                             if os.path.getsize(state['current_log_path']) > 100 * 1024 * 1024:
                                 f.flush()
                                 break 
 
-                        # 4. 루프를 빠져나왔다면, 오버랩 데이터 갱신
                         try:
                             with open(state['current_log_path'], "r", encoding="utf-8", errors="replace") as rf:
                                 lines = rf.readlines()
@@ -633,7 +589,6 @@ def call_logs(device, folder_path=None):
             finally:
                 connection.close()
 
-        # 메인 루프
         try:
             while not stop_event.is_set():
                 device_obj.shell("logcat -v threadtime", handler=log_handler)
@@ -646,13 +601,13 @@ def call_logs(device, folder_path=None):
         finally:
             logging.info(f"[{device_obj.serial}] 로그 수집 쓰레드 최종 종료")
 
-    # 스레드 시작
     stop_event = threading.Event()
     log_thread = threading.Thread(target=log_worker, args=(stop_event,), daemon=True)
     log_thread.start()
 
     logging.info(f"[*] 로그 수집 시작 (스크린샷 디바운스 대기 타임: {DEBOUNCE_TIME}초)")
     return stop_event
+
 
 # ================================== etc logging. ==================================
 # 1. 로그 중지 함수

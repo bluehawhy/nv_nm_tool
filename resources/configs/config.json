@@ -6,11 +6,13 @@
     "snapshop_log": true,
     "log_filter": [
         "[TTSCtrl] Sentence",
-        "_onLLNViewModeChanged {\"isLLNViewMode\":false"
+        "onLLNViewModeChanged {\"isLLNViewMode\":false"
     ],
-    "log_screenshot_filter": [
-        "_onLLNViewModeChanged {\"isLLNViewMode\":false"
-    ],
+    "log_screenshot_filter": {
+        "LLN_off":"onLLNViewModeChanged",
+        "maneuver_action": "[TTSCtrl] Sentence(text : 잠시 후"
+          
+    },
     "version_filter": {
         "sw_version": "[VT]\\d{3}\\.\\d{2}_\\d{6}",
         "map_version": "(?i)(?:versionid|ndsversion)[:\\(\\s]*(\\d{5})"

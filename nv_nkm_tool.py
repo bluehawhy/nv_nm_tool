@@ -55,6 +55,7 @@ revision_list=[
     'v0.72 (2026-07-23) : bug fix - double consonants not input',
     'v0.73 (2026-08-04) : bug fix - demo mode setting.',
     'v0.8 (2026-08-06) : update to use on dada system',
+    'v0.81 (2026-08-10) : add filter for log and screenshot to each folder',
     ]
 
 
