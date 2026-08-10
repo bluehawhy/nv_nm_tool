@@ -5,5 +5,4 @@ venv/
 .env.*
 _logs
 *.log
-resources/info/loca_info_screenshot.txt
-resources/info/version_info.txt
+resources/info/
