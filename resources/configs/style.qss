@@ -1,0 +1,119 @@
+/* 메인 배경: 0.4 투명도 */
+#mainWidget {
+    background-color: rgba(255, 255, 255, 0.9); 
+    border: 1px solid rgba(204, 204, 204, 0.9);
+    border-radius: 15px;
+}
+/* 타이틀바: 배경 투명 (중첩 방지) */
+#titleBar {
+    background-color: transparent; 
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+#titleLabel {
+    color: #333333;
+    font-weight: bold;
+    font-size: 12px;
+}
+.titleBtn {
+    background-color: transparent;
+    border: none;
+    font-size: 10px;
+    min-width: 40px;
+    min-height: 35px;
+}
+.titleBtn:hover { background-color: rgba(0, 0, 0, 0.1); }
+#closeBtn:hover { 
+    background-color: #E81123; 
+    color: white; 
+    border-top-right-radius: 15px; 
+}
+.sectionLabel {
+    color: #2C3E50;           /* 글자 색상 (진한 네이비) */
+    font-weight: bold;        /* 굵게 */
+    font-size: 11px;          /* 글자 크기 */
+    margin-top: 1px;         /* 위쪽 간격 */
+    margin-bottom: 1px;       /* 아래쪽 간격 */
+    border-bottom: 2px solid #3498DB; /* 아래쪽 강조 라인 */
+    padding-bottom: 2px;
+}
+/* 정보창 전용 클래스: 폰트와 내부 여백 최적화 */
+.infoLabel {
+    font-family: 'Malgun Gothic', 'NanumGothic', sans-serif;
+    font-size: 12pt;
+    color: #2C3E50;
+    background-color: rgba(255, 255, 255, 0.3);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 10px;
+    padding: 5px;
+    /* 가독성을 위해 약간 굵게 */
+    font-weight: bold;
+}
+.logLabel {
+    font-family: 'Malgun Gothic', 'NanumGothic', sans-serif;
+    font-size: 8pt;
+    /* 신뢰감을 주는 진녹색 (Deep Forest Green) */
+    color: #1E5128; 
+    /* 약간의 투명도가 있는 흰색 배경 (기존 유지) */
+    background-color: rgba(255, 255, 255, 0.4); 
+    /* 테두리도 은은한 녹색 빛으로 통일감 부여 */
+    border: 1px solid rgba(30, 81, 40, 0.2);
+    border-radius: 8px;
+    padding: 5px;
+    /* 가독성을 위해 약간 굵게 */
+    font-weight: bold;
+}
+/* 정보창(QTextEdit) 전용 스타일 */
+#info_label {
+    background-color: rgba(255, 255, 255, 0.3);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 10px;
+    padding: 10px;
+    font-size: 11px;
+    color: #2C3E50;           /* 글자 색상 (진한 네이비) */
+}
+/* 기본 버튼 스타일 */
+QPushButton {
+    /* 1. 배경 및 테두리 */
+    background-color: rgba(232, 234, 237, 0.3);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    outline: none;
+
+    /* 2. 폰트 설정 (추가된 부분) */
+    font-family: 'Malgun Gothic', sans-serif; /* 폰트 모양: 맑은 고딕 */
+    font-size: 10px;                         /* 폰트 크기: 10px */
+    color: #2C3E50;                           /* 폰트 색상: 진한 남색 */
+    font-weight: bold;                        /* 폰트 굵기: 굵게 */
+}
+/* 마우스를 올리거나, 키보드 탭으로 포커스가 갔을 때 */
+QPushButton:hover, QPushButton:focus {
+    background-color: rgba(255, 165, 0, 0.3); /* 주황색 형광 느낌 */
+    border: 2px solid #FF8C00;                /* 더 진한 주황색 테두리 */
+    color: white;                             /* 글자색 반전 */
+    font-weight: bold;
+    font-family: 'Malgun Gothic', sans-serif; /* 폰트 모양: 맑은 고딕 */
+}
+/* 버튼이 눌렸을 때 (마우스 클릭 or 엔터) */
+QPushButton:pressed {
+    background-color: #D35400; /* 더 진한 주황색 */
+    border: 2px solid #A04000;
+    padding-top: 8px; /* 아래로 살짝 눌리는 느낌 */
+    padding-left: 8px;
+    font-family: 'Malgun Gothic', sans-serif; /* 폰트 모양: 맑은 고딕 */
+}
+
+QPushButton:disabled {
+    /* 1. 회색 톤으로 비활성화 느낌 강조 */
+    background-color: #D35400; /* 더 진한 주황색 */
+    border: 1px solid #A04000;
+    color: #95a5a6; /* 흐릿한 회색 글자색 */
+
+    /* 2. ★ 핵심: 패딩을 없애거나 기본값으로 고정하여 글자 쏠림 방지 */
+    padding-top: 0px; 
+    padding-left: 0px;
+    
+    /* 3. 기본 폰트 스타일 유지 */
+    font-family: 'Malgun Gothic', sans-serif;
+    font-size: 10px;
+    font-weight: bold;
+}

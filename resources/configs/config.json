@@ -1,0 +1,23 @@
+{
+    "local_path": "D:\\project\\NKM\\NKM_Tool",
+    "local_path1": "D:\\project\\NKM\\NKM_Tool",
+    "video_recording_duration": 20,
+    "activate_log": true,
+    "snapshop_log": true,
+    "log_filter": [
+        "[TTSCtrl] Sentence",
+        "_onLLNViewModeChanged {\"isLLNViewMode\":false"
+    ],
+    "log_screenshot_filter": [
+        "_onLLNViewModeChanged {\"isLLNViewMode\":false"
+    ],
+    "version_filter": {
+        "sw_version": "[VT]\\d{3}\\.\\d{2}_\\d{6}",
+        "map_version": "(?i)(?:versionid|ndsversion)[:\\(\\s]*(\\d{5})"
+    },
+    "activated_eng_mode": {
+        "tablet": "mod@!2026Gnik",
+        "mobile": "mod@!2026Gnik",
+        "twd": "72ym@!2026Mdt"
+    }
+}

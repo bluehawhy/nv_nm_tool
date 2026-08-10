@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.env
+venv/
+.env.*
+_logs
+*.log
+resources/info/loca_info_screenshot.txt
+resources/info/version_info.txt
