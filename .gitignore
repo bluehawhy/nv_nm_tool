@@ -6,3 +6,6 @@ venv/
 _logs
 *.log
 resources/info/
+loca_info_video.txt
+version_info.txt
+loca_info_screenshot.txt
