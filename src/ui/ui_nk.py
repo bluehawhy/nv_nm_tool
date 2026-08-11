@@ -689,8 +689,15 @@ class MainWindow(QMainWindow):
             self.start_version_collector()
 
         if self.current_config.get('activate_log'):
+            # 기존 수집 스레드가 멈춰있거나 없는 경우
             if self.log_stop_signal is None or self.log_stop_signal.is_set():
-                self.log_stop_signal = func_logging.call_logs(self.device)
+                
+                # 1. AndroidLogManager 객체가 없거나 디바이스가 바뀐 경우 인스턴스 생성
+                if not hasattr(self, 'log_manager') or self.log_manager is None:
+                    self.log_manager = func_logging.AndroidLogManager(device=self.device)
+                
+                # 2. 실시간 로그 수집 시작 (start_live_logging 호출)
+                self.log_stop_signal = self.log_manager.start_live_logging()
                 logging.info("Restarted log collector.")
 
     def start_version_collector(self):
@@ -708,12 +715,20 @@ class MainWindow(QMainWindow):
             'map_version': r"(?i)(?:versionid|ndsversion)[:\(\s]*(\d{5})"
         })
         
-        self.version_stop_signal = func_logging.get_log_from_list(
-            self.device, 
+        # 1. AndroidLogManager 객체 생성 
+        # (만약 self.log_manager 등으로 이미 만들어둔 객체가 있다면 그것을 사용하셔도 됩니다)
+        log_manager = func_logging.AndroidLogManager(
+            device=self.device
+        )
+        
+        # 2. 클래스 인스턴스 메서드 호출
+        # (AndroidLogManager 내부의 get_log_from_list는 device 인자를 전달하지 않습니다)
+        self.version_stop_signal = log_manager.get_log_from_list(
             search_patterns=search_dict, 
             file_path=version_file, 
             result_dict={}
         )
+        
         logging.info("Version info collector started.")
 
     def update_version_info(self):

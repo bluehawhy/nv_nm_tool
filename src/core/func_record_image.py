@@ -52,9 +52,9 @@ def record_video(device=None, duration=None, save_dir=None):
         if os.path.exists(log_file_path):
             os.remove(log_file_path)
 
-        # 2. 로그 모니터링 스레드 시작
-        loca_stop_signal = func_logging.get_log_from_list(
-            device, 
+        # 2. AndroidLogManager 객체 생성 후 로그 모니터링 스레드 시작
+        log_manager = func_logging.AndroidLogManager(device=device)
+        loca_stop_signal = log_manager.get_log_from_list(
             search_patterns={'car_pos': ".*win 0 SFN.*"}, 
             file_path=log_file_path, 
             result_dict=video_log_results
@@ -149,10 +149,8 @@ def record_screenshot(device, loca_log=True, save_dir=None):
             os.remove(loca_info_tmp_path)
         
         results = {}
-
-        # 1. 로그 모니터링 시작
-        loca_stop_signal = func_logging.get_log_from_list(
-            device, 
+        log_manager = func_logging.AndroidLogManager(device=device)
+        loca_stop_signal = log_manager.get_log_from_list(
             search_patterns={'car_pos': ".*win 0 SFN.*"}, 
             file_path=loca_info_tmp_path, 
             result_dict=results

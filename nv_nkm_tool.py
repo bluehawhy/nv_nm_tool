@@ -2,6 +2,7 @@
 import os
 import sys
 import re
+import time
 from PyQt6.QtWidgets import QApplication
 
 # 1. 유틸리티 (설정, 로거 등)
@@ -12,7 +13,8 @@ from src.core import (
     func_device,
     call_device,  
     func_ios, 
-    func_ui_class        
+    func_ui_class,
+    func_logging        
 )
 
 # 3. UI 메인 윈도우 모듈 (ui)
@@ -80,15 +82,8 @@ def debug_mode():
     devices = call_device.discover_and_connect_device()
     #ios_control = func_ios.IOSDeviceController(lockdown_device=devices[1]['lockdown_device'])
     #ios_control.download_photos_by_date('2026-07-16')
-    func_device.activate_eng(devices[0], 'STOP')
-    #locations = func_ui_class.find_location_by_UI_class(devices[0], letters=['확인'],package_name="com.android.inputmethod.keyboard.Key")
-#
-    ## locations가 딕셔너리이고 '확인' 키가 실제로 존재하는지 안전하게 검사
-    #if isinstance(locations, dict) and locations.get('확인'):
-    #    func_device.touch_window(devices[0], locations['확인'])
-    #    logging.info(f"'확인' 클릭 성공: {locations['확인']}")
-    #else:
-    #    logging.warning("'확인' 키를 찾지 못했습니다. (KeyError 방지 처리됨)")
+    func_logging.AndroidLogManager(devices[0]).start_live_logging()
+    time.sleep(5)
 
 
 if __name__ == '__main__':

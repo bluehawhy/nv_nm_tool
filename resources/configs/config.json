@@ -10,7 +10,8 @@
     ],
     "log_screenshot_filter": {
         "LLN_off":"onLLNViewModeChanged",
-        "maneuver_action": "[TTSCtrl] Sentence(text : 잠시 후"
+        "maneuver_action": "Sentence\\(text : (now|잠시 후)",
+		"onLanesInfoChanged":"onLanesInfoChanged"
           
     },
     "version_filter": {
