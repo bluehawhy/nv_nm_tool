@@ -149,7 +149,6 @@ def update_button(res, button_name, location, config_file="resources/configs/but
         return False
 
 #================================== basic func ==================================
-
 def touch_window(device, pos):
     """
     ppadb의 device_obj를 사용하여 특정 좌표(x, y)를 터치합니다.
@@ -189,7 +188,7 @@ def two_finger_touch(device, pos1, pos2):
         (pos2['x'], pos2['y'])  # finger2 end
     )
 
-def swipe_window(device, pos1, pos2, duration=600):
+def swipe_window(device, pos1, pos2, duration : int = 600):
     """
     ppadb의 device_obj를 사용하여 화면을 스와이프합니다.
     pos1에서 pos2까지 지정된 시간(duration, ms) 동안 이동합니다.
@@ -216,7 +215,7 @@ def swipe_window(device, pos1, pos2, duration=600):
         logging.error(f"[{serial}] 스와이프 작업 중 에러 발생: {e}")
         return -1
 
-def repeat_swipe_window(device,pos1,pos2,duration=600,cnt_reqeat=0):
+def repeat_swipe_window(device,pos1,pos2,duration : int = 600,cnt_reqeat : int = 0):
     cnt_scroll= 0
     while cnt_scroll < cnt_reqeat:
         cnt_scroll += 1
@@ -479,7 +478,6 @@ def update_button_location_in_eng_mode(device):
     button_info = call_button_info(res)
     return button_info
 
-
 def open_navi_setting(device):
     #1. 설정이 이미 있는지 확인
     set_locations = func_ui_class.find_location_by_UI_class(device, ['설정','Settings'], package_name='navis.ncn.navi')
@@ -501,7 +499,6 @@ def open_navi_setting(device):
         print('click setting icon.')
         return False
     return True
-
 
 def go_to_eng_mode(device):
     # 1. 설정 메뉴 열기
@@ -549,7 +546,6 @@ def go_to_eng_mode(device):
         time.sleep(0.1)  # 팝업 전환 및 버퍼링 대기시간 확보
         return True
     return False
-
 
 def activate_eng(device):
     '''
@@ -803,6 +799,8 @@ def set_guidance_off(device):
     open_navi_setting(device)
     touch_window(device,button_info['ui_guidance_off'])
 
+
+#--------------------------------- 키보드 및 입력 기능 함수 ---------------------------------
 def decompose_text(text):
     """
     한글(자모 및 이중모음/쌍자음/겹받침 분리), 영어, 숫자, 특수문자가 섞인 텍스트를 
@@ -896,7 +894,7 @@ def check_language(char):
         return "etc" # 숫자나 특수문자 등
     return "etc"
 
-def set_lang_in_keyboard(device, target_lan, max_attempts=10):
+def set_lang_in_keyboard(device, target_lan, max_attempts : int = 10):
     LANG_MAP = {
         'KR': ['한국어', 'korean', 'ko'],
         'EN': ['english', '영어', 'en'],
@@ -1110,9 +1108,6 @@ def update_keyboard_key(device, lan_type):
         logging.info(f"[ERROR] update_keyboard_key 실행 중 오류 발생: {e}")
         return -1
 
-
-
-
 def is_keyboard_present(u2):
     """
     현재 화면에 소프트 키보드가 올라와 있는지 확인합니다.
@@ -1140,7 +1135,6 @@ def is_keyboard_present(u2):
         logging.error(f"키보드 XML 검사 중 오류: {e}")
 
     return False
-
 
 def press_key_by_char(device, char, lan_type="KR"):
     keyboard_json_path = "resources/configs/keyboard.json"

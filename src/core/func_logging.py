@@ -4,9 +4,12 @@ import re
 import threading
 import time
 from contextlib import ExitStack
-from datetime import datetime, timedelta
+from datetime import datetime
 from ..core import func_record_image
 from ..utils import configus, loggas
+from collections import deque
+
+
 
 logging = loggas.logger
 
@@ -87,25 +90,30 @@ class AndroidLogManager:
         self.log_dir = os.path.join(self.folder_path, "logs")
         os.makedirs(self.log_dir, exist_ok=True)
 
-
         # 실시간 수집 상태 관리 변수
         self.file_count = 0
         self.overlap_lines = []
         self.current_log_path = ""
         self.current_filter_path = ""
         self.last_screenshot_time = 0.0
+        self.latest_car_pos = None
         
-        # 스레드 통신용 이벤트
+        # 스레드 통신용 이벤트 및 락
         self.stop_event = None
+        self.lock = threading.Lock()
+
+        # 🚀 [개편] 실시간 로그를 메모리에 유지할 링 버퍼 (최근 10,000줄 저장)
+        self.recent_logs = deque(maxlen=10000)
+        
+        # 🚀 [개편] 등록된 패턴 검색 작업 등록 리스트
+        self.active_pattern_jobs = []
 
     def close_connection_by_error(self):
         """UI단 또는 외부에 의해 에러가 감지되었을 때 수집 스레드 및 커넥션을 완전히 강제 종료합니다."""
         logging.info(f"[{self.serial}] UI 단 요청으로 인한 커넥션 및 수집 종료 처리 시작")
         
-        # 1. 스레드 종료 이벤트 발생
         self.stop_live_logging()
         
-        # 2. ppadb socket connection 강제 닫기 (Socket 속성이 존재하는 경우)
         try:
             if hasattr(self.device_obj, 'connection') and self.device_obj.connection:
                 self.device_obj.connection.close()
@@ -113,28 +121,24 @@ class AndroidLogManager:
         except Exception as e:
             logging.debug(f"[{self.serial}] Connection socket 종료 중 예외 (이미 닫힘): {e}")
 
-        # 3. 추가적인 ADB process cleaning이 필요하다면 실행
         try:
             subprocess.run(["adb", "-s", self.serial, "logcat", "-c"], capture_output=True)
         except Exception:
             pass
 
     def _update_paths(self):
-        """실시간 로그 및 필터 로그의 저장 경로를 갱신합니다."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         suffix = f"_{self.file_count}" if self.file_count > 0 else ""
         self.current_log_path = os.path.join(self.log_dir, f"log_{timestamp}{suffix}.txt")
         self.current_filter_path = os.path.join(self.log_dir, f"log_{timestamp}{suffix}_filtered.txt")
 
     def _expand_log_buffer(self):
-        """디바이스의 로그 버퍼 사이즈를 100M로 확대합니다."""
         try:
             self.device_obj.shell("logcat -G 100M")
         except Exception as e:
             logging.info(f"[{self.serial}] 로그 버퍼 설정 실패: {e}")
 
     def _update_overlap_context(self):
-        """파일 교체 시 문맥 보존을 위해 마지막 10줄을 갱신합니다."""
         try:
             with open(self.current_log_path, "r", encoding="utf-8", errors="replace") as rf:
                 lines = rf.readlines()
@@ -143,10 +147,6 @@ class AndroidLogManager:
             self.overlap_lines = []
 
     def start_live_logging(self, debounce_time=3.0):
-        """
-        실시간 로그 수집 및 100MB 분할 저장을 백그라운드 스레드에서 시작합니다.
-        (기존 call_logs_before 및 call_logs 통합본)
-        """
         self._expand_log_buffer()
         self._update_paths()
 
@@ -158,11 +158,10 @@ class AndroidLogManager:
         )
         log_thread.start()
 
-        logging.info(f"[*] [{self.serial}] 로그 수집 시작 (스크린샷 디바운스 대기 타임: {debounce_time}초)")
+        logging.info(f"[*] [{self.serial}] 단일 통합 소켓 로그 수집 시작")
         return self.stop_event
 
     def stop_live_logging(self):
-        """실시간 로그 수집 스레드를 안전하게 중지시킵니다."""
         if self.stop_event is not None and not self.stop_event.is_set():
             logging.info(f"[{self.serial}] 로그 수집 중지 요청 중...")
             self.stop_event.set()
@@ -170,10 +169,8 @@ class AndroidLogManager:
         return False
 
     def _live_log_worker(self, debounce_time):
-        """로그캣 스트림 접속을 유지하고 재시작을 제어하는 메인 워커 루프"""
         try:
             while not self.stop_event.is_set():
-                # handler 방식으로 실행 (이 명령은 핸들러가 리턴될 때까지 블로킹됩니다)
                 self.device_obj.shell(
                     "logcat -v threadtime", 
                     handler=lambda conn: self._live_log_stream_handler(conn, debounce_time)
@@ -189,92 +186,193 @@ class AndroidLogManager:
             logging.info(f"[{self.serial}] 로그 수집 쓰레드 최종 종료")
 
 
+
+    # 🚀 [신규 메서드] 스크린샷 캡처를 별도 스레드에서 수행
+    def _take_screenshot(self, save_dir):
+        """스크린샷 작업을 별도 스레드에서 실행"""
+        try:
+            func_record_image.record_screenshot(
+                device=self.device,
+                log_manager=self,
+                save_dir=save_dir
+            )
+        except Exception as e:
+            logging.error(
+                f"[{self.serial}] 스크린샷 캡처 중 오류 발생: {e}"
+            )
+
     def _live_log_stream_handler(self, connection, debounce_time):
-        """소켓 스트림으로부터 바이너리 데이터를 받아 파일 처리 및 필터링을 수행합니다."""
-        is_snapshot_enabled = self.config.get('snapshop_log', False) 
+        is_snapshot_enabled = self.config.get('snapshop_log', False)
         filter_keywords = self.config.get('log_filter', [])
-        is_filter_active = is_snapshot_enabled and isinstance(filter_keywords, list) and len(filter_keywords) > 0
+        is_filter_active = (
+            is_snapshot_enabled
+            and isinstance(filter_keywords, list)
+            and len(filter_keywords) > 0
+        )
 
         try:
             with ExitStack() as stack:
-                # 1. 파일 오픈
-                f = stack.enter_context(open(self.current_log_path, "w", encoding="utf-8", buffering=1024*1024))
+                f = stack.enter_context(
+                    open(
+                        self.current_log_path,
+                        "w",
+                        encoding="utf-8",
+                        buffering=1024 * 1024
+                    )
+                )
+
                 f_filter = None
                 if is_filter_active:
-                    f_filter = stack.enter_context(open(self.current_filter_path, "w", encoding="utf-8"))
-                    f_filter.write(f"=== Filter Active: {filter_keywords} ===\n\n")
+                    f_filter = stack.enter_context(
+                        open(self.current_filter_path, "w", encoding="utf-8")
+                    )
+                    f_filter.write(
+                        f"=== Filter Active: {filter_keywords} ===\n\n"
+                    )
 
-                # 2. 이전 파일 문맥 기록
                 if self.overlap_lines:
-                    f.write("\n" + "="*50 + "\n=== Previous Context ===\n")
+                    f.write(
+                        "\n" + "=" * 50 +
+                        "\n=== Previous Context ===\n"
+                    )
                     f.writelines(self.overlap_lines)
-                    f.write("="*50 + "\n\n")
+                    f.write("=" * 50 + "\n\n")
 
-                # 3. 데이터 읽기 루프
                 while not self.stop_event.is_set():
-                    chunk = connection.read(8192)  # 8KB씩 읽기
+
+                    chunk = connection.read(8192)
+
                     if not chunk:
-                        return  # 스트림 끊김 시 리턴
-                    
-                    text = chunk.decode('utf-8', errors='replace')
+                        return
+
+                    text = chunk.decode("utf-8", errors="replace")
                     f.write(text)
-                    
-                    # 줄 단위 분할 및 필터링 검사
-                    if (is_filter_active and f_filter) or self.sfm.is_active:
-                        for line in text.splitlines():
-                            
-                            # 일반 로그 텍스트 필터 저장
-                            if is_filter_active and f_filter:
-                                if any(word.upper() in line.upper() for word in filter_keywords):
-                                    f_filter.write(line + "\n")
-                            
-                            # 🔥 sfm.match(line) 호출로 call_logs와 동일하게 변경된 스크린샷 필터링
-                            if self.sfm.is_active:
-                                for folder_name in self.sfm.match(line):
-                                    current_time = time.time()
-                                    
-                                    if current_time - self.last_screenshot_time >= debounce_time:
-                                        self.last_screenshot_time = current_time
-                                        logging.info(f"📸 [{self.serial}] [{folder_name} 조건 충족 - 캡처 실행]: {line.strip()}")
-                                        
-                                        try:
-                                            target_save_dir = os.path.join(self.folder_path, folder_name)
-                                            os.makedirs(target_save_dir, exist_ok=True)
-                                            
-                                            func_record_image.record_screenshot(
-                                                device=self.device, 
-                                                save_dir=target_save_dir
-                                            )
-                                        except Exception as screenshot_err:
-                                            logging.error(f"스크린샷 캡처 중 오류 발생: {screenshot_err}")
-                                    else:
-                                        remaining = debounce_time - (current_time - self.last_screenshot_time)
-                                        logging.debug(f"⏳ [디바운스 중] 스크린샷 무시됨 (남은 시간: {remaining:.1f}초): {line.strip()}")
+
+                    lines = text.splitlines(keepends=True)
+
+                    for line in lines:
+                        clean_line = line.rstrip("\r\n")
+
+                        # 1. 최근 로그
+                        with self.lock:
+                            self.recent_logs.append(
+                                (time.time(), clean_line)
+                            )
+
+                        # 2. 최신 위치 로그는 즉시 갱신
+                        if "win 0 SFN" in clean_line:
+                            pc_time = datetime.now().strftime(
+                                "%H:%M:%S.%f"
+                            )[:-3]
+
+                            self.latest_car_pos = (
+                                pc_time,
+                                clean_line
+                            )
+
+                        # 3. 패턴 작업
+                        self._process_pattern_jobs(clean_line)
+
+                        # 4. 필터 로그
+                        if is_filter_active and f_filter:
+                            if any(
+                                word.upper() in clean_line.upper()
+                                for word in filter_keywords
+                            ):
+                                f_filter.write(line)
+
+                        # 5. 스크린샷 트리거
+                        if self.sfm.is_active:
+                            for folder_name in self.sfm.match(clean_line):
+
+                                current_time = time.time()
+
+                                if (
+                                    current_time - self.last_screenshot_time
+                                    >= debounce_time
+                                ):
+                                    self.last_screenshot_time = current_time
+
+                                    logging.info(
+                                        f"📸 [{self.serial}] "
+                                        f"[{folder_name} 조건 충족 - 캡처 실행]: "
+                                        f"{clean_line}"
+                                    )
+
+                                    target_save_dir = os.path.join(
+                                        self.folder_path,
+                                        folder_name
+                                    )
+                                    os.makedirs(
+                                        target_save_dir,
+                                        exist_ok=True
+                                    )
+
+                                    # ⭐ 핵심: 스크린샷을 별도 스레드에서 실행
+                                    threading.Thread(
+                                        target=self._take_screenshot,
+                                        args=(target_save_dir,),
+                                        daemon=True
+                                    ).start()
 
                     if is_filter_active and f_filter:
                         f_filter.flush()
 
-                    # 100MB 용량 체크 및 파일 로테이션
-                    if os.path.getsize(self.current_log_path) > 100 * 1024 * 1024:
+                    if os.path.getsize(
+                        self.current_log_path
+                    ) > 100 * 1024 * 1024:
                         f.flush()
-                        break 
+                        break
 
             self._update_overlap_context()
             self.file_count += 1
             self._update_paths()
-            return 
 
         except Exception as e:
-            logging.error(f"[{self.serial}] 핸들러 실행 중 오류: {e}")
+            logging.error(
+                f"[{self.serial}] 핸들러 실행 중 오류: {e}"
+            )
+
         finally:
             connection.close()
 
 
-    def get_snapshot_logs(self, folder_path=None, duration_sec=3):
-        """
-        현재 시점 기준 [과거 duration_sec ~ 미래 duration_sec]의 로그 스냅샷을 수집하고 필터링합니다.
-        (기존 get_snapshot_logs 기능)
-        """
+
+
+
+
+    # 🚀 [신규 메서드] 패턴 모니터링 내부 처리기
+    def _process_pattern_jobs(self, line):
+        if not self.active_pattern_jobs:
+            return
+
+        with self.lock:
+            for job in list(self.active_pattern_jobs):
+                for key, pattern_re in list(job['compiled_patterns'].items()):
+                    if key not in job['found_versions']:
+                        match = pattern_re.search(line)
+                        if match:
+                            extracted_value = (match.group(1) if match.groups() else match.group()).strip()
+                            job['found_versions'][key] = extracted_value
+                            
+                            try:
+                                with open(job['file_path'], "a", encoding="utf-8") as f:
+                                    f.write(f"{key}: {extracted_value}\n")
+                                logging.info(f"[{self.serial}] 패턴 기록 완료! [{key}] -> {extracted_value}")
+                                
+                                if job['result_dict'] is not None:
+                                    job['result_dict'][key] = extracted_value
+                            except Exception as file_err:
+                                logging.error(f"파일 기록 오류: {file_err}")
+
+                # 모든 패턴 탐색 완료 시 작업 해제
+                if len(job['found_versions']) >= len(job['search_patterns']):
+                    logging.info(f"[{self.serial}] {' ALL PATTERNS FOUND ':=^50}")
+                    job['stop_event'].set()
+                    self.active_pattern_jobs.remove(job)
+
+    # 🚀 [통합] 추가 ADB 세션 연결 없이 메모리 버퍼 및 실시간 모니터링 활용
+    def get_snapshot_logs(self, folder_path=None, duration_sec=60):
         if folder_path is None:
             log_dir = os.path.join(self.config.get('local_path', './'), "logs", "snapshot")
         else:
@@ -285,144 +383,101 @@ class AndroidLogManager:
         is_filter_active = isinstance(log_filter, list) and len(log_filter) > 0
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_path = os.path.join(log_dir, f"Screenshot_{timestamp}.txt")
-        filtered_file_path = os.path.join(log_dir, f"Screenshot_{timestamp}_filtered.txt")
+        file_path = os.path.join(log_dir, f"Snapshot_{timestamp}.txt")
+        filtered_file_path = os.path.join(log_dir, f"Snapshot_{timestamp}_filtered.txt")
 
-        past_time = (datetime.now() - timedelta(seconds=duration_sec)).strftime("%m-%d %H:%M:%S.000")
-        logging.info(f"[*] [{self.serial}] 스냅샷 로그 수집 시작 (시작지점: {past_time})")
-        
+        logging.info(f"[*] [{self.serial}] 스냅샷 로그 추출 시작 (과거 {duration_sec}초 ~ 미래 {duration_sec}초)")
+
+        now = time.time()
+        start_threshold = now - duration_sec
+
+        # 1. 과거 로그 추출 (메모리 링 버퍼 조회)
+        with self.lock:
+            past_logs = [line for t, line in self.recent_logs if t >= start_threshold]
+
         try:
-            with ExitStack() as stack:
-                f = stack.enter_context(open(file_path, "w", encoding="utf-8"))
-                f_filter = None
+            with open(file_path, "w", encoding="utf-8") as f, \
+                 open(filtered_file_path, "w", encoding="utf-8") if is_filter_active else ExitStack() as f_filter:
+                
                 if is_filter_active:
-                    f_filter = stack.enter_context(open(filtered_file_path, "w", encoding="utf-8"))
                     f_filter.write(f"=== Log Filter Active: {log_filter} ===\n\n")
 
-                # 1. 과거 로그 긁어오기
-                logging.info(f"[{self.serial}] [1/2] 과거 {duration_sec}초 로그 복사 및 필터링 중...")
-                past_process = subprocess.run(
-                    ["adb", "-s", self.serial, "logcat", "-v", "threadtime", "-t", past_time],
-                    capture_output=True, text=True, encoding="utf-8", errors="replace"
-                )
-                
-                for line in past_process.stdout.splitlines():
+                # 과거 로그 쓰기
+                for line in past_logs:
                     f.write(line + "\n")
-                    if is_filter_active and f_filter:
+                    if is_filter_active:
                         if any(word.upper() in line.upper() for word in log_filter):
                             f_filter.write(line + "\n")
 
                 separator = f"\n{'='*50}\n=== PAST LOG END / REAL-TIME START AT {datetime.now()} ===\n{'='*50}\n\n"
                 f.write(separator)
-                if f_filter: 
+                if is_filter_active:
                     f_filter.write(separator)
 
-                # 2. 실시간 로그 수집 시작
-                logging.info(f"[{self.serial}] [2/2] 실시간 로그 수집 중 ({duration_sec}초간)...")
-                process = subprocess.Popen(
-                    ["adb", "-s", self.serial, "logcat", "-v", "threadtime"],
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                    encoding="utf-8", errors="replace"
-                )
+                # 2. 미래 duration_sec 동안 실시간 로깅 관찰
+                end_time = time.time() + duration_sec
+                last_idx = len(self.recent_logs)
 
-                start_time = time.time()
-                while time.time() - start_time < duration_sec:
-                    line = process.stdout.readline()
-                    if not line: 
-                        break
-                    
-                    f.write(line)
-                    if is_filter_active and f_filter:
-                        if any(word.upper() in line.upper() for word in log_filter):
-                            f_filter.write(line)
-                            f_filter.flush()
+                while time.time() < end_time:
+                    time.sleep(0.1)
+                    with self.lock:
+                        current_len = len(self.recent_logs)
+                        if current_len > last_idx:
+                            new_items = list(self.recent_logs)[last_idx:current_len]
+                            last_idx = current_len
+                        else:
+                            new_items = []
 
-                # 프로세스 종료
-                if process.poll() is None:
-                    subprocess.run(['taskkill', '/F', '/T', '/PID', str(process.pid)], capture_output=True)
-                    process.wait()
+                    for _, line in new_items:
+                        f.write(line + "\n")
+                        if is_filter_active:
+                            if any(word.upper() in line.upper() for word in log_filter):
+                                f_filter.write(line + "\n")
 
             logging.info(f"[+] [{self.serial}] 스냅샷 저장 완료: {file_path}")
-            if is_filter_active:
-                logging.info(f"[+] [{self.serial}] 필터링된 스냅샷 저장 완료: {filtered_file_path}")
             return True
-            
         except Exception as e:
             logging.error(f"[!] [{self.serial}] 스냅샷 수집 중 에러: {e}")
             return False
 
-    def get_log_from_list(self, search_patterns, file_path, result_dict=None, timeout_seconds=300):
-        """
-        정규식 패턴 세트가 완전히 매칭될 때까지 실시간으로 로그를 추적하여 파일에 저장합니다.
-        (기존 get_log_from_list 기능)
-        """
+    # 🚀 [통합] 패턴 작업을 라이브 스레드에 작업으로 등록하여 수집
+    def fetch_log_from_list(self, search_patterns, file_path, result_dict=None, timeout_seconds=300):
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         
-        # 중복 실행 방지 검사
+        stop_event = threading.Event()
+
         if os.path.exists(file_path):
             with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
                 if all(f"{key}:" in content for key in search_patterns.keys()):
-                    stop_event = threading.Event()
                     stop_event.set()
                     return stop_event
 
-        def _pattern_worker(stop_event):
-            found_versions = {}
-            start_time = time.time()
-            compiled_patterns = {key: re.compile(pattern) for key, pattern in search_patterns.items()}
+        job = {
+            'search_patterns': search_patterns,
+            'compiled_patterns': {key: re.compile(pattern) for key, pattern in search_patterns.items()},
+            'file_path': file_path,
+            'result_dict': result_dict,
+            'found_versions': {},
+            'stop_event': stop_event,
+            'start_time': time.time()
+        }
 
-            def _pattern_handler(connection):
-                try:
-                    while not stop_event.is_set():
-                        if time.time() - start_time > timeout_seconds:
-                            logging.warning(f"[{self.serial}] {' TIMEOUT: STOPPING MONITOR ':=^50}")
-                            break
+        with self.lock:
+            self.active_pattern_jobs.append(job)
 
-                        data = connection.read(4096)
-                        if not data:
-                            break
-                        
-                        chunk = data.decode('utf-8', errors='replace')
-                        for line in chunk.splitlines():
-                            for key, pattern_re in compiled_patterns.items():
-                                if key not in found_versions:
-                                    match = pattern_re.search(line)
-                                    if match:
-                                        extracted_value = (match.group(1) if match.groups() else match.group()).strip()
-                                        found_versions[key] = extracted_value
-                                        
-                                        try:
-                                            with open(file_path, "a", encoding="utf-8") as f:
-                                                f.write(f"{key}: {extracted_value}\n")
-                                                f.flush()
-                                            logging.info(f"[{self.serial}] 패턴 기록 완료! [{key}] -> {extracted_value}")
-                                            
-                                            if result_dict is not None:
-                                                result_dict[key] = extracted_value
-                                        except Exception as file_err:
-                                            logging.error(f"파일 기록 오류: {file_err}")
+        # 타임아웃 감시 스레드
+        def _timeout_checker():
+            while not stop_event.is_set():
+                if time.time() - job['start_time'] > timeout_seconds:
+                    logging.warning(f"[{self.serial}] TIMEOUT: 패턴 모니터링 중단")
+                    with self.lock:
+                        if job in self.active_pattern_jobs:
+                            self.active_pattern_jobs.remove(job)
+                    stop_event.set()
+                    break
+                time.sleep(1)
 
-                            if len(found_versions) >= len(search_patterns):
-                                logging.info(f"[{self.serial}] {' ALL ITEMS FOUND ':=^50}")
-                                return  # 핸들러 리턴 종료
-
-                except Exception as e:
-                    logging.error(f"[{self.serial}] 패턴 핸들러 내부 오류: {e}")
-                finally:
-                    connection.close()
-
-            try:
-                self.device_obj.shell("logcat -c")  # 기존 버퍼 비우기
-                logging.info(f"[{self.serial}] {' LOG PATTERN MONITORING START ':=^50}")
-                self.device_obj.shell("logcat -v threadtime", handler=_pattern_handler)
-                stop_event.set()
-            except Exception as e:
-                logging.error(f"[{self.serial}] 패턴 수집 중 에러 발생: {e}")
-            finally:
-                logging.info(f"[{self.serial}] 패턴 수집 스레드 종료.")
-
-        stop_event = threading.Event()
-        pattern_thread = threading.Thread(target=_pattern_worker, args=(stop_event,), daemon=True)
-        pattern_thread.start()
+        threading.Thread(target=_timeout_checker, daemon=True).start()
         return stop_event
+

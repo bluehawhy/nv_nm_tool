@@ -4,6 +4,81 @@ from ..utils import loggas
 logging= loggas.logger
 
 # ================================= search location ====================================
+def convert_wgs_to_nds(wgs_pos):
+    NDS_FACTOR = 11930464.71
+    
+    if not isinstance(wgs_pos, dict):
+        return None
+        
+    try:
+        # latitude / lat / x 순서로 Key 체크
+        lat = (wgs_pos.get('latitude') if wgs_pos.get('latitude') is not None
+               else wgs_pos.get('lat') if wgs_pos.get('lat') is not None
+               else wgs_pos.get('x'))
+        
+        # longitude / lon / y 순서로 Key 체크
+        lon = (wgs_pos.get('longitude') if wgs_pos.get('longitude') is not None
+               else wgs_pos.get('lon') if wgs_pos.get('lon') is not None
+               else wgs_pos.get('y'))
+
+        if lat is not None and lon is not None:
+            nds_x = int(round(float(lat) * NDS_FACTOR))
+            nds_y = int(round(float(lon) * NDS_FACTOR))
+            
+            return {"x": nds_x, "y": nds_y}
+            
+    except Exception as e:
+        logging.error(f"WGS -> NDS 변환 중 오류 발생: {e}")
+        
+    return None
+
+def parse_location(location_input):
+    """
+    다양한 형태의 위치 입력값을 {'latitude': float, 'longitude': float} 형태로 표준화합니다.
+    
+    지원하는 입력 형태:
+    1. 문자열: "37.60039253324384, 127.10905251041765" 또는 "37.60, 127.10"
+    2. Dict (x, y): {'x': 37.600..., 'y': 127.109...}
+    3. Dict (lat, lon): {'lat': 37.600..., 'lon': 127.109...}
+    4. Dict (latitude, longitude): {'latitude': 37.600..., 'longitude': 127.109...}
+    """
+    if location_input is None:
+        return None
+
+    # 1. 문자열인 경우 ("lat, lon" 형태)
+    if isinstance(location_input, str):
+        try:
+            parts = location_input.split(',')
+            if len(parts) == 2:
+                lat = float(parts[0].strip())
+                lon = float(parts[1].strip())
+                return {'latitude': lat, 'longitude': lon}
+        except (ValueError, AttributeError):
+            return None
+
+    # 2. Dictionary인 경우
+    elif isinstance(location_input, dict):
+        # latitude / lat / x 순으로 값 찾기
+        lat = (location_input.get('latitude') 
+               if location_input.get('latitude') is not None 
+               else location_input.get('lat') 
+               if location_input.get('lat') is not None 
+               else location_input.get('x'))
+
+        # longitude / lon / y 순으로 값 찾기
+        lon = (location_input.get('longitude') 
+               if location_input.get('longitude') is not None 
+               else location_input.get('lon') 
+               if location_input.get('lon') is not None 
+               else location_input.get('y'))
+
+        if lat is not None and lon is not None:
+            try:
+                return {'latitude': float(lat), 'longitude': float(lon)}
+            except (ValueError, TypeError):
+                return None
+    return None
+
 def ext_nds_pos(results):
     nds_pos = {'y': 0, 'x': 0}
     log_line = results.get('car_pos', '')
@@ -20,18 +95,41 @@ def conv_nds_wgs(nds_pos):
     lat = None
     lon = None
     try:
-        # 0도 False가 아니라고 판단하도록 None 체크로 변경
-        if nds_pos.get('x') is not None and nds_pos.get('y') is not None:
-            # 0, 0 인 경우 변환하면 0.0, 0.0이 됨 (에러 방지)
-            lat = round(float(nds_pos['x']) / NDS_FACTOR, 7)
-            lon = round(float(nds_pos['y']) / NDS_FACTOR, 7)
+        # x/y 키 또는 lat/lon 키 중 존재하는 값을 가져옴 (0인 경우 고려해 None 체크)
+        raw_x = nds_pos.get('x') if nds_pos.get('x') is not None else nds_pos.get('latitude')
+        raw_y = nds_pos.get('y') if nds_pos.get('y') is not None else nds_pos.get('longitude')
+
+        if raw_x is not None and raw_y is not None:
+            # 기존 매핑 규칙 유지: x (또는 lat) -> lat, y (또는 lon) -> lon
+            lat = round(float(raw_x) / NDS_FACTOR, 7)
+            lon = round(float(raw_y) / NDS_FACTOR, 7)
             
-            # 구글 지도 표준 링크 형식으로 수정 제안
+            # 구글 지도 표준 링크
             google_map_link = f"https://www.google.com/maps?q={lat},{lon}"
             
             return {"lat": lat, "lon": lon, "link": google_map_link}
     except Exception as e:
         logging.info(f"좌표 변환 중 오류 발생: {e}")
+    return None
+
+def conv_wgs_nds(wgs_pos):
+    NDS_FACTOR = 11930464.71
+    nds_x = None
+    nds_y = None
+    try:
+        # 입력키는 lat/lon, latitude/longitude, x/y 등 상황에 맞게 dict 접근
+        # lat=위도(y축 방향), lon=경도(x축 방향)
+        lat = wgs_pos.get('lat') if wgs_pos.get('lat') is not None else wgs_pos.get('latitude')
+        lon = wgs_pos.get('lon') if wgs_pos.get('lon') is not None else wgs_pos.get('longitude')
+
+        if lat is not None and lon is not None:
+            # NDS 좌표계는 정수형(int)으로 표현됩니다.
+            nds_x = int(round(float(lat) * NDS_FACTOR))
+            nds_y = int(round(float(lon) * NDS_FACTOR))
+
+            return {"x": nds_x, "y": nds_y}
+    except Exception as e:
+        logging.info(f"WGS -> NDS 좌표 변환 중 오류 발생: {e}")
     return None
 
 def save_loca(results,loca_local_path):

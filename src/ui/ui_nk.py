@@ -236,7 +236,6 @@ class TwdAdbWidget(QWidget):
         layout.addStretch(1)
 
 
-
 # --- 4. 메인 GUI 클래스 ---
 class MainWindow(QMainWindow):
     def __init__(self, version, revision):
@@ -721,7 +720,7 @@ class MainWindow(QMainWindow):
         if self.and_log_manager is None:
             return
 
-        self.version_stop_signal = self.and_log_manager.get_log_from_list(
+        self.version_stop_signal = self.and_log_manager.fetch_log_from_list(
             search_patterns=search_dict, 
             file_path=version_file, 
             result_dict={}
@@ -929,8 +928,8 @@ class MainWindow(QMainWindow):
     def cmd_gotoeng(self): self.run_task(func_device.go_to_eng_mode, self.device)
     def cmd_activate_eng(self): self.run_task(func_device.activate_eng, self.device)
     def cmd_react_adb(self): self.run_task(call_device.react_adb)
-    def cmd_rec_video(self): self.run_task(func_record_image.record_video, self.device)
-    def cmd_tk_screenshot(self): self.run_task(func_record_image.record_screenshot, self.device)
+    def cmd_rec_video(self): self.run_task(func_record_image.record_video, self.device,self.and_log_manager)
+    def cmd_tk_screenshot(self): self.run_task(func_record_image.record_screenshot, self.device, self.and_log_manager)
     def cmd_demo_on(self): self.run_task(func_device.set_demo_mode, self.device, "START")
     def cmd_demo_stop(self): self.run_task(func_device.set_demo_mode, self.device, "STOP")
     def cmd_demo_pause(self): self.run_task(func_device.set_demo_mode, self.device, "PAUSE")

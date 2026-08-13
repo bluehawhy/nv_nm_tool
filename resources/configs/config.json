@@ -1,9 +1,8 @@
 {
-    "local_path": "D:\\project\\NKM\\NKM_Tool",
+    "local_path": "D:\\project\\NKM\\NKM_Tool_Test",
     "local_path1": "D:\\project\\NKM\\NKM_Tool",
     "video_recording_duration": 20,
     "activate_log": true,
-    "snapshop_log": true,
     "log_filter": [
         "[TTSCtrl] Sentence",
         "onLLNViewModeChanged {\"isLLNViewMode\":false"

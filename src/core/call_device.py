@@ -292,7 +292,7 @@ class AndroidConnector:
             # uiautomator2 동적 연결
             try:
                 dev_info['u2_device'] = u2.connect(adb_obj.serial)
-                print(f"connected to android device: {adb_obj.serial}")
+                #print(f"connected to android device: {adb_obj.serial}")
             except Exception as u2_err:
                 logging.error(f"Android [{adb_obj.serial}] u2 동적 연결 실패: {u2_err}")
                 

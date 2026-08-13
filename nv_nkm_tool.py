@@ -14,7 +14,9 @@ from src.core import (
     call_device,  
     func_ios, 
     func_ui_class,
-    func_logging        
+    func_logging,
+    func_record_image,
+    location_utils
 )
 
 # 3. UI 메인 윈도우 모듈 (ui)
@@ -79,18 +81,55 @@ def prod_mode():
 
 def debug_mode():
     #call_device.start_adb_server()
-    devices = call_device.discover_and_connect_device()
+    #devices = call_device.discover_and_connect_device()
     #ios_control = func_ios.IOSDeviceController(lockdown_device=devices[1]['lockdown_device'])
     #ios_control.download_photos_by_date('2026-07-16')
-    func_logging.AndroidLogManager(devices[0]).start_live_logging()
-    time.sleep(5)
+    #device = devices[0]
+    #logmanager = func_logging.AndroidLogManager(device=device)
+    #logmanager.start_live_logging()
+    #time.sleep(1)
+    wsg_loca = "37.60039253324384, 127.10905251041765"
+    parsed_location = location_utils.parse_location(wsg_loca)
+    logging.info(f"Parsed Location: {parsed_location}")
+    nds_location = location_utils.convert_wgs_to_nds(parsed_location)
+    logging.info(f"Converted NDS Location: {nds_location}")
+
+
+    def scroll_map_to_location(device, target_location):
+        """
+        지도 화면에서 지정된 target_location(위도, 경도)으로 스크롤합니다.
+        target_location: {'latitude': float, 'longitude': float}
+        """
+        location_utils.parse_location(target_location)  # WGS 좌표를 NDS 좌표로 변환
+
+        get_current_map_center = None
+        # 1. 현재 지도 중심 좌표 확인
+        current_location = get_current_map_center(device)
+        
+        if not current_location:
+            logging.error("현재 지도 중심 좌표를 가져오지 못했습니다.")
+            return False
+
+        # 2. 목표 위치와 현재 위치 비교
+        lat_diff = target_location['latitude'] - current_location['latitude']
+        lon_diff = target_location['longitude'] - current_location['longitude']
+
+        # 3. 스크롤 방향 결정 (간단한 예시: 위/아래, 좌/우)
+        if abs(lat_diff) > 0.0001 or abs(lon_diff) > 0.0001:
+            # 스크롤 필요
+            func_device.swipe_window(device,)
+            return True
+        else:
+            logging.info("이미 목표 위치에 도달했습니다.")
+            return True
+
 
 
 if __name__ == '__main__':
     loggas.set_debug_logging(True)
-    #debug_mode()
+    debug_mode()
     
     #loggas.set_debug_logging(True)
     #call_device.start_adb_server()
-    prod_mode()
+    #prod_mode()
     
