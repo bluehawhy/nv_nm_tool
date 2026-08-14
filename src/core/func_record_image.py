@@ -62,7 +62,7 @@ def record_video(device=None, log_manager=None, duration=None, save_dir=None):
 
             if 'car_pos' in results:
                 logging.info(f"[{device_obj_serial}] Location info found: {results['car_pos']}")
-                location_utils.save_loca(results, car_pos_path)
+                location_utils.save_loca(results['car_pos'], car_pos_path)
             else:
                 logging.warning(f"[{device_obj_serial}] No location info captured in 2 seconds.")
                 with open(car_pos_path, "w", encoding="utf-8") as f:

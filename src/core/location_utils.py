@@ -25,12 +25,20 @@ def convert_wgs_to_nds(wgs_pos):
             nds_x = int(round(float(lat) * NDS_FACTOR))
             nds_y = int(round(float(lon) * NDS_FACTOR))
             
-            return {"x": nds_x, "y": nds_y}
+            return {"latitude": nds_x, "longitude": nds_y}
             
     except Exception as e:
         logging.error(f"WGS -> NDS 변환 중 오류 발생: {e}")
         
     return None
+
+def parse_map_scale_km(log_str):
+    """로그 텍스트에서 'km [숫자]' 패턴을 찾아 float으로 반환합니다."""
+    match = re.search(r'\bkm\s+([\d\.]+)', log_str)
+    if match:
+        return float(match.group(1))
+    return None  # 파싱 실패 시 기본값 처리용
+
 
 def parse_location(location_input):
     """
@@ -79,25 +87,24 @@ def parse_location(location_input):
                 return None
     return None
 
-def ext_nds_pos(results):
-    nds_pos = {'y': 0, 'x': 0}
-    log_line = results.get('car_pos', '')
+def ext_nds_pos_from_log(log_line):
+    nds_pos = {'latitude': 0, 'longitude': 0}
     
     # pos 뒤의 두 숫자 덩어리 추출
     match = re.search(r'pos\s+(-?\d+)\s+(-?\d+)', log_line)
     if match:
-        nds_pos['y'] = match.group(1)
-        nds_pos['x'] = match.group(2)
+        nds_pos['longitude'] = match.group(1)
+        nds_pos['latitude'] = match.group(2)
     return nds_pos
 
-def conv_nds_wgs(nds_pos):
+def convert_nds_wgs(nds_pos):
     NDS_FACTOR = 11930464.71
     lat = None
     lon = None
     try:
         # x/y 키 또는 lat/lon 키 중 존재하는 값을 가져옴 (0인 경우 고려해 None 체크)
-        raw_x = nds_pos.get('x') if nds_pos.get('x') is not None else nds_pos.get('latitude')
-        raw_y = nds_pos.get('y') if nds_pos.get('y') is not None else nds_pos.get('longitude')
+        raw_x = nds_pos.get('latitude') if nds_pos.get('latitude') is not None else nds_pos.get('x')
+        raw_y = nds_pos.get('longitude') if nds_pos.get('longitude') is not None else nds_pos.get('y')
 
         if raw_x is not None and raw_y is not None:
             # 기존 매핑 규칙 유지: x (또는 lat) -> lat, y (또는 lon) -> lon
@@ -107,7 +114,7 @@ def conv_nds_wgs(nds_pos):
             # 구글 지도 표준 링크
             google_map_link = f"https://www.google.com/maps?q={lat},{lon}"
             
-            return {"lat": lat, "lon": lon, "link": google_map_link}
+            return {"latitude": lat, "longitude": lon, "link": google_map_link}
     except Exception as e:
         logging.info(f"좌표 변환 중 오류 발생: {e}")
     return None
@@ -127,27 +134,28 @@ def conv_wgs_nds(wgs_pos):
             nds_x = int(round(float(lat) * NDS_FACTOR))
             nds_y = int(round(float(lon) * NDS_FACTOR))
 
-            return {"x": nds_x, "y": nds_y}
+            return {"latitude": nds_x, "longitude": nds_y}
     except Exception as e:
         logging.info(f"WGS -> NDS 좌표 변환 중 오류 발생: {e}")
     return None
 
-def save_loca(results,loca_local_path):
+def save_loca(log_line,loca_local_path):
     #확인된 로그 저장
     
     # 1. 좌표 변환 과정 (기존 함수 활용)
-    nds_pos = ext_nds_pos(results)
-    conv_nds_wgs_result = conv_nds_wgs(nds_pos)
+    nds_pos = ext_nds_pos_from_log(log_line)
+    conv_nds_wgs_result = convert_nds_wgs(nds_pos)
     
     with open(loca_local_path, "w", encoding="utf-8") as f:
         f.write("=== Log Results ===\n")
-        f.write(str(results))
+        f.write(str(log_line))
         
         f.write("\n\n=== Converted WGS84 Coordinates ===\n")
         if conv_nds_wgs_result:
-            f.write(str({'lat': conv_nds_wgs_result['lat'], 'lon': conv_nds_wgs_result['lon']}))
+            f.write(str({'latitude': conv_nds_wgs_result['latitude'], 'longitude': conv_nds_wgs_result['longitude']}))
             f.write(str('\n'))
             f.write(str(conv_nds_wgs_result['link']))
         else:
             f.write("No coordinate data found or conversion failed.")
     return 0
+

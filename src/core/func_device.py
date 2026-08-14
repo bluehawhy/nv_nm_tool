@@ -149,7 +149,7 @@ def update_button(res, button_name, location, config_file="resources/configs/but
         return False
 
 #================================== basic func ==================================
-def touch_window(device, pos):
+def one_finger_touch(device, pos):
     """
     ppadb의 device_obj를 사용하여 특정 좌표(x, y)를 터치합니다.
     """
@@ -490,7 +490,7 @@ def open_navi_setting(device):
         print(f"not found setting icon.... ")
         logging.info("not found setting icon....")
         return False
-    touch_window(device,location)
+    one_finger_touch(device,location)
 
     #3. 설정 아이콘이 오픈안됫을 때
     set_locations = func_ui_class.find_location_by_UI_class(device, ['설정','Settings'])
@@ -539,7 +539,7 @@ def go_to_eng_mode(device):
     if eng_key in locations:
         eng_pos = locations[eng_key]
         logging.info(f"히든 메뉴 감지 ({eng_key}): {eng_pos}")
-        touch_window(device, eng_pos)
+        one_finger_touch(device, eng_pos)
         # 1. 마찬가지로 스레드로 백그라운드 연산 유도
         time.sleep(0.1)  # 팝업 전환 및 버퍼링 대기시간 확보
         update_button_location_in_eng_mode(device)
@@ -593,14 +593,14 @@ def activate_eng(device):
         eng_pos = locations[eng_key]
         logging.info(f"🚀 히든 메뉴 감지 ({eng_key}): {eng_pos}")
         update_button(res, "eng_hidden", {"x":eng_pos['x'],"y":eng_pos['y']})
-        touch_window(device, eng_pos)
+        one_finger_touch(device, eng_pos)
         print('already eng mode activated, start check button positions')
         # 1. 마찬가지로 스레드로 백그라운드 연산 유도
         # update_button_location_in_eng_mode(device)
         # 2. 💡 스크린샷 확보를 위한 대기 타임
         button_info = call_button_info(res)
-        touch_window(device, button_info['eng_back'])
-        touch_window(device,button_info['ui_set_off'])
+        one_finger_touch(device, button_info['eng_back'])
+        one_finger_touch(device,button_info['ui_set_off'])
         return False
         
     # 2. Stop Navigation 또는 안내종료가 감지된 경우 (엔지니어링 모드 활성화 빌드업)
@@ -614,7 +614,7 @@ def activate_eng(device):
 
     button_info = call_button_info(res)
     for _ in range(12):
-        touch_window(device,button_info['eng_hidden'])
+        one_finger_touch(device,button_info['eng_hidden'])
         time.sleep(0.1)
     confdata = configus.load_config('resources/configs/config.json')
     
@@ -631,7 +631,7 @@ def activate_eng(device):
 
     # locations가 딕셔너리이고 '확인' 키가 실제로 존재하는지 안전하게 검사
     if isinstance(locations, dict) and locations.get('확인'):
-        touch_window(device, locations['확인'])
+        one_finger_touch(device, locations['확인'])
         logging.info(f"첫 번째 '확인' 클릭 성공: {locations['확인']}")
     else:
         logging.warning("첫 번째 '확인' 키를 찾지 못했습니다. (KeyError 방지 처리됨)")
@@ -643,7 +643,7 @@ def activate_eng(device):
     # ----------------------------------------------------
     locations = func_ui_class.find_location_by_UI_class(device, letters=['확인'])
     if isinstance(locations, dict) and locations.get('확인'):
-        touch_window(device, locations['확인'])
+        one_finger_touch(device, locations['확인'])
         logging.info(f"두 번째 '확인' 클릭 성공: {locations['확인']}")
     else:
         logging.warning("두 번째 '확인' 키를 찾지 못했습니다. (KeyError 방지 처리됨)")
@@ -653,8 +653,8 @@ def activate_eng(device):
 
     # 2. 💡 스크린샷 확보를 위한 대기 타임
     button_info = call_button_info(res)
-    touch_window(device, button_info['eng_back'])
-    touch_window(device,button_info['ui_set_off'])
+    one_finger_touch(device, button_info['eng_back'])
+    one_finger_touch(device,button_info['ui_set_off'])
     
 def select_latter_eng(device,search_latter):
     device_type, res_x, res_y = get_device_type_and_res(device)
@@ -673,11 +673,11 @@ def select_latter_eng(device,search_latter):
         print(f'please check {search_latter} in eng mode')
         return 0
     else:
-        touch_window(device, location[search_latter.lower()])
+        one_finger_touch(device, location[search_latter.lower()])
         # 7. 화면 닫기 및 정리 (button_info 딕셔너리가 전역 또는 내부에 선언되어 있다고 가정)
     try:
-        touch_window(device, button_info['eng_back'])
-        touch_window(device, button_info['ui_set_off'])
+        one_finger_touch(device, button_info['eng_back'])
+        one_finger_touch(device, button_info['ui_set_off'])
     except NameError:
         logging.warning("button_info 정의를 찾을 수 없어 화면 닫기 단계를 스킵합니다.")
         return 0
@@ -714,12 +714,12 @@ def select_latter_box_eng(device, search_latter, value):
     matched_location = locations[mv_key]
    
     # 5. 입력창 선택 및 기존 값 청소
-    touch_window(device, matched_location)  # [교정] locations 대신 매칭된 좌표 전달
+    one_finger_touch(device, matched_location)  # [교정] locations 대신 매칭된 좌표 전달
     if value =='-':
         logging.info(f'radio icon -{matched_location}. finish')
         try:
-            touch_window(device, button_info['eng_back'])
-            touch_window(device, button_info['ui_set_off'])
+            one_finger_touch(device, button_info['eng_back'])
+            one_finger_touch(device, button_info['ui_set_off'])
         except NameError:
             logging.warning("button_info 정의를 찾을 수 없어 화면 닫기 단계를 스킵합니다.")
         return True
@@ -738,7 +738,7 @@ def select_latter_box_eng(device, search_latter, value):
 
     # locations가 딕셔너리이고 '확인' 키가 실제로 존재하는지 안전하게 검사
     if isinstance(locations, dict) and locations.get('확인'):
-        touch_window(device, locations['확인'])
+        one_finger_touch(device, locations['확인'])
         logging.info(f"'확인' 클릭 성공: {locations['확인']}")
     else:
         logging.warning("'확인' 키를 찾지 못했습니다. (KeyError 방지 처리됨)")
@@ -746,8 +746,8 @@ def select_latter_box_eng(device, search_latter, value):
     
     # 7. 화면 닫기 및 정리 (button_info 딕셔너리가 전역 또는 내부에 선언되어 있다고 가정)
     try:
-        touch_window(device, button_info['eng_back'])
-        touch_window(device, button_info['ui_set_off'])
+        one_finger_touch(device, button_info['eng_back'])
+        one_finger_touch(device, button_info['ui_set_off'])
     except NameError:
         logging.warning("button_info 정의를 찾을 수 없어 화면 닫기 단계를 스킵합니다.")
     return True  # 최종 성공 플래그 반환
@@ -763,7 +763,7 @@ def set_demo_speed(device,value):
         print('set demo speed failed')
         return 0
 
-    touch_window(device, button_info['simulation_speed'])
+    one_finger_touch(device, button_info['simulation_speed'])
     # 기존 텍스트 지우기 및 새 값 입력 // backspace 3번 delete 3번
     send_keyevent(device,67)
     send_keyevent(device,67)
@@ -773,8 +773,8 @@ def set_demo_speed(device,value):
     send_keyevent(device,112)
     input_text(device, value)
     send_keyevent(device,66)
-    touch_window(device,button_info['eng_back'])
-    touch_window(device,button_info['ui_set_off'])
+    one_finger_touch(device,button_info['eng_back'])
+    one_finger_touch(device,button_info['ui_set_off'])
     return 0
 
 def set_demo_mode(device,value):
@@ -797,7 +797,7 @@ def set_guidance_off(device):
     res = device['resolution']
     button_info = call_button_info(res)
     open_navi_setting(device)
-    touch_window(device,button_info['ui_guidance_off'])
+    one_finger_touch(device,button_info['ui_guidance_off'])
 
 
 #--------------------------------- 키보드 및 입력 기능 함수 ---------------------------------
@@ -1210,11 +1210,11 @@ def press_key_by_char(device, char, lan_type="KR"):
         # 7. 터치 실행 (Shift -> 키 입력 -> Shift 해제)
         if is_double_consonant:
             logging.info(f"[INFO] '{char}' 입력을 위해 Shift 동작을 조합합니다.")
-            touch_window(device, shift_pos)  # Shift ON
-            touch_window(device, char_pos)   # 대상 키 눌림 (예: ㄱ -> ㄲ 입력됨)
-            touch_window(device, shift_pos)  # Shift OFF (복구)
+            one_finger_touch(device, shift_pos)  # Shift ON
+            one_finger_touch(device, char_pos)   # 대상 키 눌림 (예: ㄱ -> ㄲ 입력됨)
+            one_finger_touch(device, shift_pos)  # Shift OFF (복구)
         else:
-            touch_window(device, char_pos)
+            one_finger_touch(device, char_pos)
 
         logging.info(f"[SUCCESS] '{char}' 입력 완료 -> 좌표: ({char_pos['x']}, {char_pos['y']})")
         return 0
