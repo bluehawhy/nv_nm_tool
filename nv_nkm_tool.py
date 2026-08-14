@@ -606,6 +606,9 @@ def prod_mode():
 
 if __name__ == '__main__':
     loggas.set_debug_logging(True)
+    # --- 사용 예시 ---
+    #file_path = r"C:/Users/miskang/Downloads/서울특별시_노면색깔유도선 위치 현황_20250417.csv"
+    #location_utils.convert_korea2000_to_wgs_csv(file_path)
     debug_mode()
     
     #loggas.set_debug_logging(True)

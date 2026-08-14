@@ -183,3 +183,4 @@ def convert_korea2000_to_wgs_csv(input_path: str, output_path: str = None):
 
     df.to_csv(output_path, index=False, encoding="utf-8-sig")
     logging.info(f"✅ 좌표 변환 완료! 저장 경로: {output_path}")
+
