@@ -1,5 +1,7 @@
 import re
 from ..utils import loggas
+import pandas as pd
+from pyproj import Transformer
 
 logging= loggas.logger
 
@@ -159,3 +161,25 @@ def save_loca(log_line,loca_local_path):
             f.write("No coordinate data found or conversion failed.")
     return 0
 
+def convert_korea2000_to_wgs_csv(input_path: str, output_path: str = None):
+    """Korea 2000(EPSG:5186) 좌표계 CSV를 WGS84(EPSG:4326)로 변환하여 저장합니다."""
+    # 1. CSV 파일 불러오기
+    df = pd.read_csv(input_path, encoding="cp949")
+
+    # 2. EPSG:5186 -> EPSG:4326(WGS84) 변환기 생성
+    transformer = Transformer.from_crs("EPSG:5186", "EPSG:4326", always_xy=True)
+
+    # 3. 경도, 위도 변환
+    df["경도"], df["위도"] = transformer.transform(
+        df["X좌표"].values, df["Y좌표"].values
+    )
+
+    # 4. 문자열 결합 (apply 대비 훨씬 빠른 벡터화 방식)
+    df["좌표값"] = df["위도"].astype(str) + ", " + df["경도"].astype(str)
+
+    # 5. 저장 경로 미지정 시 기본 파일명 생성
+    if not output_path:
+        output_path = input_path.replace(".csv", "_WGS84.csv")
+
+    df.to_csv(output_path, index=False, encoding="utf-8-sig")
+    logging.info(f"✅ 좌표 변환 완료! 저장 경로: {output_path}")
