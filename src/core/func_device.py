@@ -11,6 +11,7 @@ from ..utils import configus, loggas
 logging= loggas.logger
 
 
+
 def get_device_type_and_res(device):
     """
     해상도 문자열(예: '1920x720')을 기반으로 기기 타입을 결정합니다.
@@ -40,7 +41,7 @@ def get_device_type_and_res(device):
 
 def call_button_info(resolution):
     # 1. 관리용으로 정리된 JSON 로드
-    data = configus.load_config('resources/configs/button_info.json')
+    data = configus.load_config('resources/configs/self.button_info.json')
     
     # 2. 결과값을 담을 딕셔너리
     button_info = {}
@@ -79,7 +80,7 @@ def call_button_info(resolution):
                     logging.warning(f"⚠️ [한글 키보드 좌표 없음] han_keyboard['{key}']의 해상도('{resolution}') 좌표 정보가 없어 (0, 0)으로 설정합니다.")
     return button_info
 
-def update_button(res, button_name, location, config_file="resources/configs/button_info.json"):
+def update_button(res, button_name, location, config_file="resources/configs/self.button_info.json"):
     """
     res: 기기 해상도 (예: "1752x2800")
     button_name: JSON 내 button_layouts의 자식 키 (예: "ui_guidance_off")
@@ -148,140 +149,6 @@ def update_button(res, button_name, location, config_file="resources/configs/but
         logging.info(f"[{button_name}] JSON 업데이트 중 예외 발생: {e}")
         return False
 
-#================================== basic func ==================================
-def one_finger_touch(device, pos):
-    """
-    ppadb의 device_obj를 사용하여 특정 좌표(x, y)를 터치합니다.
-    """
-    # 1. 요청하신 대로 ppadb 객체 추출
-    device_obj = device['ppadb_device']
-    serial = device_obj.serial
-    #logging.info(device_obj)
-    x, y = str(pos['x']), str(pos['y'])
-    
-    # 2. 명령어 구성 (adb prefix 없이 shell 내부 명령만 전달)    
-    try:
-        logging.info(f"[{serial}] Touch Window: ({x}, {y})")
-        
-        # 3. ppadb를 통한 실행 (subprocess보다 훨씬 빠름)
-        # 결과를 기다리지 않는 비동기식 클릭 (매우 빠른 연타 시 유리)
-        device_obj.shell(f"input tap {x} {y}")
-        return 0
-    except Exception as e:
-        logging.error(f"[{serial}] Touch Error: {e}")
-        return -1
-
-def two_finger_touch(device, pos1, pos2):
-    '''
-    두 지점을 동시에 터치하는 기능
-    pos1, pos2 는 {x:, y:}, {x:, y:} 구조여야 합니다.
-    '''
-    d = device['u2_device']
-    # 외부 변수 d 대신 인자로 받은 device를 사용하도록 수정
-    map_view = d()
-    
-    # uiautomator2의 gesture 기능을 이용해 두 손가락 터치 수행
-    map_view.gesture(
-        (pos1['x'], pos1['y']), # finger1 start
-        (pos2['x'], pos2['y']), # finger2 start
-        (pos1['x'], pos1['y']), # finger1 end
-        (pos2['x'], pos2['y'])  # finger2 end
-    )
-
-def swipe_window(device, pos1, pos2, duration : int = 600):
-    """
-    ppadb의 device_obj를 사용하여 화면을 스와이프합니다.
-    pos1에서 pos2까지 지정된 시간(duration, ms) 동안 이동합니다.
-    """
-    # 1. ppadb 객체 및 시리얼 추출
-    device_obj = device['ppadb_device']
-    serial = device_obj.serial
-    
-    # 좌표 및 시간 추출
-    x1, y1 = pos1['x'], pos1['y']
-    x2, y2 = pos2['x'], pos2['y']
-    
-    # 2. 명령어 구성 (input swipe x1 y1 x2 y2 duration)
-    command = f"input swipe {x1} {y1} {x2} {y2} {duration}"
-    
-    try:
-        logging.info(f"[{serial}] Swipe Window: ({x1}, {y1}) -> ({x2}, {y2}) over {duration}ms")
-        
-        # 3. ppadb를 통한 실행
-        # 스와이프는 동작이 끝날 때까지 기다리는 것이 흐름 제어에 유리하므로 &를 빼고 실행하는 것을 권장합니다.
-        device_obj.shell(command)
-        return 0
-    except Exception as e:
-        logging.error(f"[{serial}] 스와이프 작업 중 에러 발생: {e}")
-        return -1
-
-def repeat_swipe_window(device,pos1,pos2,duration : int = 600,cnt_reqeat : int = 0):
-    cnt_scroll= 0
-    while cnt_scroll < cnt_reqeat:
-        cnt_scroll += 1
-        swipe_window(device,pos1,pos2,duration)
-        time.sleep(0.1)
-    return 0
-
-def input_text(device, text):
-    """
-    ppadb의 device_obj를 사용하여 텍스트를 입력합니다.
-    공백은 안드로이드 input 시스템이 인식하도록 %s로 치환하여 전달합니다.
-    """
-    # 1. ppadb 객체 및 시리얼 추출
-    device_obj = device['ppadb_device']
-    serial = device_obj.serial
-    
-    # 2. 텍스트 안전 처리 (공백 치환)
-    if isinstance(text, (int, float)):
-        safe_text = str(text)
-    else:
-        # 안드로이드 input text는 공백을 허용하지 않으므로 %s로 예약어 치환
-        # (기존에 잘 동작하던 로직 유지)
-        safe_text = str(text).replace(" ", "%s")
-
-    # 3. 명령어 구성
-    # 쉘 명령어로 전달할 때는 따옴표로 감싸주는 것이 안전합니다.
-    command = f'input text "{safe_text}"'
-    
-    try:
-        logging.info(f"[{serial}] Input Text: {text} (Encoded: {safe_text})")
-        
-        # 4. ppadb를 통한 실행
-        device_obj.shell(command)
-        
-        return 0
-    except Exception as e:
-        logging.error(f"[{serial}] Input Text Error {e}")
-        return -1
-
-def send_keyevent(device, keycode):
-    """
-    ppadb의 device_obj를 사용하여 안드로이드 키 이벤트를 전송합니다.
-    주요 키코드:
-    3  - Home
-    4  - Back
-    66 - Enter
-    67 - Backspace
-    """
-    # 1. ppadb 객체 및 시리얼 추출
-    device_obj = device['ppadb_device']
-    serial = device_obj.serial
-    
-    # 2. 명령어 구성
-    command = f"input keyevent {keycode}"
-    
-    try:
-        logging.info(f"[{serial}] Send Keyevent: {keycode}")
-        
-        # 3. ppadb를 통한 실행
-        device_obj.shell(command)
-        
-        return 0
-    except Exception as e:
-        logging.error(f"[{serial}] Send Keyevent Error: {e}")
-        return -1
-    
 def push_file_background(device, local_file, device_file):
     device_obj = device['ppadb_device']
     serial = device_obj.serial
@@ -349,458 +216,594 @@ def push_file_background(device, local_file, device_file):
 
     threading.Thread(target=_run_push, daemon=True).start()
 
-def swipe_window_til_latter(device, latter, x_latters=['개발 설정', 'engineering']):
-    '''
-    화면을 스크롤하며 목표 UI(latter: string)를 탐색합니다.
-    화면 바닥에 도달하거나 정체되면 False를, 찾으면 좌표 지점을 리턴합니다.
-    '''
-    # TODO: 속도 개선
-    device_type, res_x, res_y = get_device_type_and_res(device)
-    d = device["u2_device"]
-    
-    # 1. 기준점(X좌표용) 탐색
-    locations = func_ui_class.find_location_by_UI_class(device, x_latters)
-    logging.info(f"기준점 탐색 결과: {locations}")
-    
-    # 2. x_latters 중 화면에 존재하는 기준점 채택
-    navi_key = None
-    for target in x_latters:
-        if target in locations:
-            navi_key = target
-            break
-            
-    if not navi_key:
-        logging.error(f"제시된 기준 메뉴 {x_latters}를 찾지 못해 업데이트를 스킵합니다.")
-        return False
 
-    location = locations[navi_key]
+#================================== basic func ==================================
+class TouchController:
+    def __init__(self, device: dict):
+        """
+        device: {'ppadb_device': ..., 'u2_device': ...} 형태의 딕셔너리
+        """
+        self.ppadb = device.get('ppadb_device')
+        self.u2 = device.get('u2_device')
+        self.serial = self.ppadb.serial if self.ppadb else "Unknown"
+
     
-    # 해상도 기반 스크롤 영역 계산
-    swipe_start_y = int(res_y * 0.7)
-    swipe_end_y = int(res_y * 0.3)
-    
-    # 클릭 안전 y 범위 설정 (0 <= y <= res_y * 0.9)
-    max_safe_y = res_y * 0.9
-    
-    prev_xml = ''
-    
-    while True:
-        time.sleep(0.1)
-        # 3. 현재 화면에서 목표 string(latter) 검색
-        current_locations = func_ui_class.find_location_by_UI_class(device, [latter])
+    def one_finger_touch(self, pos):
+
+        """단일 지점 터치 (PPADB 활용)"""
+        if not self.ppadb:
+            logging.error(f"[{self.serial}] PPADB 객체가 설정되지 않았습니다.")
+            return -1
+        x, y = str(pos['x']), str(pos['y'])
         
-        # [교정] 대소문자 무시하고 키 매칭 수행
-        matched_key = next((k for k in current_locations if k.lower() == latter.lower()), None)
+        # 2. 명령어 구성 (adb prefix 없이 shell 내부 명령만 전달)    
+        try:
+            logging.info(f"[{self.serial}] Touch: ({x}, {y})")
+            self.ppadb.shell(f"input tap {x} {y}")
+            return 0
+        except Exception as e:
+            logging.error(f"[{self.serial}] Touch Error: {e}")
+            return -1
 
-        # 4. 일치하는 키를 찾았고, Y 좌표가 화면 안전 범위(0 ~ 90%) 내에 있는 경우에만 리턴
-        if matched_key:
-            target_pos = current_locations[matched_key]
-            target_y = target_pos.get('y', 0)
-            
-            if 0 <= target_y <= max_safe_y:
-                logging.info(f"🎯목표 UI '{latter}' 발견! (매칭된 키: {matched_key}, Y: {target_y}) 지점 리턴: {target_pos}")
-                return target_pos
-            else:
-                logging.info(f"👀 UI '{latter}'를 발견했지만 화면 하단 짤림 영역(Y: {target_y} > {max_safe_y})에 있어 스크롤을 더 진행합니다.")
+    def two_finger_touch(self, pos1: dict, pos2: dict):
+        """두 지점 동시 터치 (uiautomator2 활용)"""
+        if not self.u2:
+            logging.error(f"[{self.serial}] u2_device 객체가 설정되지 않았습니다.")
+            return
+        map_view = self.u2()
+        # 외부 변수 d 대신 인자로 받은 device를 사용하도록 수정
+        map_view = self.u2()
+        map_view.gesture(
+            (pos1['x'], pos1['y']),
+            (pos2['x'], pos2['y']),
+            (pos1['x'], pos1['y']),
+            (pos2['x'], pos2['y'])
+        )
 
-        # 5. 스크롤 전 현재 화면의 UI XML 상태 백업
-        current_xml = d.dump_hierarchy(compressed=False, pretty=True)
+    def swipe(self, pos1: dict, pos2: dict, duration: int = 600) -> int:
+        """화면 스와이프 (PPADB 활용)"""
+        if not self.ppadb:
+            logging.error(f"[{self.serial}] PPADB 객체가 설정되지 않았습니다.")
+            return -1
         
-        # 6. 이전 XML과 똑같다면 화면 바닥에 도달한 것이므로 종료
-        if prev_xml == current_xml:
-            logging.warning(f"스크롤 종료: '{latter}'를 찾지 못하고 화면 끝에 도달했습니다.")
-            print(f"스크롤 종료: '{latter}'를 찾지 못하고 화면 끝에 도달했습니다.")
+        # 좌표 및 시간 추출
+        x1, y1 = pos1['x'], pos1['y']
+        x2, y2 = pos2['x'], pos2['y']
+        
+        # 2. 명령어 구성 (input swipe x1 y1 x2 y2 duration)
+        command = f"input swipe {x1} {y1} {x2} {y2} {duration}"
+        
+        try:
+            logging.info(f"[{self.serial}] Swipe: ({x1}, {y1}) -> ({x2}, {y2}) over {duration}ms")
+            self.ppadb.shell(command)
+            return 0
+        except Exception as e:
+            logging.error(f"[{self.serial}] Swipe Error: {e}")
+            return -1
+
+    def repeat_swipe(self, pos1: dict, pos2: dict, duration: int = 600, count: int = 1) -> int:
+        """지정한 횟수만큼 반복 스와이프"""
+        for i in range(count):
+            res = self.swipe(pos1, pos2, duration)
+            if res != 0:
+                return -1
+            time.sleep(0.1)
+        return 0
+    
+#================================== intergrated func ==================================
+class NaviController(TouchController):
+    """
+    TouchController의 기초 터치/스와이프 기능을 상속받아
+    내비게이션 UI 탐색, 설정 진입, 엔지니어링 모드 활성화 등의 고도화 기능을 수행하는 클래스
+    """
+    def __init__(self, device: dict):
+        super().__init__(device)
+        self.device = device
+        
+        # 기기 해상도 및 설정 정보 미리 파싱
+        self.device_type, self.res_x, self.res_y = get_device_type_and_res(device)
+        self.button_info = call_button_info(self.device['resolution'])
+
+    def open_navi_setting(self) -> bool:
+        """내비게이션 설정 메뉴를 열고 상태를 반환합니다."""
+        # 1. 설정이 이미 있는지 확인
+        set_locations = func_ui_class.find_location_by_UI_class(
+            self.device, ['설정', 'Settings'], package_name='navis.ncn.navi'
+        )
+        if set_locations and isinstance(set_locations, dict):
+            logging.info(f"[{self.serial}] 이미 설정 메뉴가 열려있습니다.")
+            return True
+
+        # 2. 설정이 안 열려 있는 경우 아이콘 탐색
+        location = func_ui_class.find_setting_icon_by_UI(self.device)
+        if location is None:
+            logging.warning(f"[{self.serial}] 설정 아이콘을 찾을 수 없습니다.")
+            return False
+        
+        # 상속받은 touch 메서드 활용 (one_finger_touch)
+        self.touch(location)
+        time.sleep(0.2)
+
+        # 3. 오픈 결과 확인
+        set_locations = func_ui_class.find_location_by_UI_class(self.device, ['설정', 'Settings'])
+        if not set_locations or not isinstance(set_locations, dict):
+            logging.warning(f"[{self.serial}] 설정 클릭 후 메뉴 진입 실패 - '설정', 'Settings'")
             return False
             
-        prev_xml = current_xml
+        return True
 
-        # 7. 찾지 못했거나 화면 범위 밖에 있으므로 스크롤 다운 수행
-        logging.info(f"Searching... '{latter}' 탐색을 위해 스크롤 진행")
-        swipe_window(
-            device, 
-            pos1={'x': location['x'], 'y': swipe_start_y}, 
-            pos2={'x': location['x'], 'y': swipe_end_y}, 
+    def go_to_eng_mode(self):
+        # 1. 설정 메뉴 열기
+        if not self.open_navi_setting():
+            return False
+            
+        time.sleep(0.1)
+        swipe_x = int(self.res_x * 0.25)
+        swipe_start_y = int(self.res_y * 0.7)
+        swipe_end_y = int(self.res_y * 0.3)
+        self.swipe(
+            pos1={'x': swipe_x, 'y': swipe_start_y}, 
+            pos2={'x': swipe_x, 'y': swipe_end_y}, 
+            duration=300
+        )
+        # 2. 1차 UI 검색
+        locations = func_ui_class.find_location_by_UI_class(self.device, ['개발 설정', 'engineering'])
+        logging.info(f"1차 매칭 결과: {locations}")
+
+        # 3. 비활성화 상태인 경우에만 activate_eng 및 2차 재시도 실행
+        if not locations or not isinstance(locations, dict):
+            logging.warning("engineering mode 비활성화 상태. 활성화(activate_eng) 시도.")
+            # NaviController의 메서드로 호출하도록 수정
+            self.activate_eng()
+            time.sleep(0.2)
+
+            # activate_eng 수행 후 2차 확인
+            if not self.open_navi_setting():
+                return False
+            locations = func_ui_class.find_location_by_UI_class(self.device, ['개발 설정', 'engineering'])
+            if not locations or not isinstance(locations, dict):
+                logging.warning("활성화 시도 후에도 메뉴를 찾지 못했습니다.")
+                return False
+
+        # 4. 🎯 위치를 찾았다면(1차든 2차든) 바로 터치 후 종료!
+        eng_key = 'engineering' if 'engineering' in locations else '개발 설정'
+        if eng_key in locations:
+            eng_pos = locations[eng_key]
+            logging.info(f"히든 메뉴 감지 ({eng_key}): {eng_pos}")
+            self.one_finger_touch(eng_pos)
+            # 1. 마찬가지로 스레드로 백그라운드 연산 유도
+            time.sleep(0.1)  # 팝업 전환 및 버퍼링 대기시간 확보
+            self.update_button_location_in_eng_mode()
+            time.sleep(0.1)  # 팝업 전환 및 버퍼링 대기시간 확보
+            return True
+        return False
+
+    def activate_eng(self):
+        '''
+        eng mode 해제.
+        1. 설정 버튼 누름
+        2. 안내 종료 위치 확인 및 아래 칸 위치 조정
+        3. 안내 종료 밑에 빈 칸을 10번 누름
+        4. 비밀번호 해제 전달 // 프로젝트 찾아야함...
+        5. 확인 누름
+        '''
+        setting_flag = self.open_navi_setting()
+        if not setting_flag:
+            return False
+
+        #스크롤 한번 하기
+        swipe_x = int(self.res_x * 0.25)
+        swipe_start_y = int(self.res_y * 0.7)
+        swipe_end_y = int(self.res_y * 0.3)
+        self.swipe(
+            pos1={'x': swipe_x, 'y': swipe_start_y}, 
+            pos2={'x': swipe_x, 'y': swipe_end_y}, 
             duration=300
         )
 
-#================================== intergrated func ==================================
+        #설정 창 들어갔으니 설정 뒤로가기 끄기 업데이트
+        setting_back_off = func_ui_class.find_setting_back_off_button_by_UI(self.device)
+        update_button(self.res, "ui_set_back", {"x":setting_back_off['ui_set_back']['x'],"y":setting_back_off['ui_set_back']['y']})
+        update_button(self.res, "ui_set_off", {"x":setting_back_off['ui_set_off']['x'],"y":setting_back_off['ui_set_off']['y']})
 
-def update_button_location_in_eng_mode(device):
-    device_type, res_x, res_y = get_device_type_and_res(device)
-    res = device['resolution']
-    button_info = call_button_info(res)
-    target_letters = ['개발 설정', 'engineering', 'start', 'stop', 'pause', 'repeat']
-    locations = func_ui_class.find_location_by_UI_class(device, target_letters)
-    time.sleep(0.1)
-    eng_locations = func_ui_class.find_eng_back_button_by_UI(device)
-    time.sleep(0.1)
-    switch_raido_location = func_ui_class.find_eng_swith_text_by_UI(device,['simulation speed', 'night mode'])
-    time.sleep(0.1)
-    
-    # 1. 진입 기준점 확인 (메인 메뉴 둘 다 없으면 진행 불가하므로 이 단계만 방어)
-    if '개발 설정' not in locations and 'engineering' not in locations:
-        logging.error("기준 메뉴('개발 설정'/'Engineering')를 찾지 못해 업데이트를 스킵합니다.")
-        return button_info
+        locations = func_ui_class.find_location_by_UI_class(self.device, ['개발 설정','engineering','stop navigation',"안내종료"])
+        logging.info(f"매칭 결과: {locations}")
 
-    # 메인 메뉴 기준 좌표 지정
-    navi_key = '개발 설정' if '개발 설정' in locations else 'engineering'
-    Engineering = locations[navi_key]
-
-    # 공통/기본 메뉴 업데이트
-    if eng_locations is not None:
-        update_button(res, "eng_back", {"x": eng_locations['x'], "y": eng_locations['y']})
-
-    # 데모 제어 버튼들 각각 개별 체크 후 업데이트
-    if 'start' in locations:
-        update_button(res, "end_demo_on", {"x": locations['start']['x'], "y": locations['start']['y']})
-        
-    if 'stop' in locations:
-        update_button(res, "end_demo_stop", {"x": locations['stop']['x'], "y": locations['stop']['y']})
-        
-    if 'pause' in locations:
-        update_button(res, "end_demo_pause", {"x": locations['pause']['x'], "y": locations['pause']['y']})
-        
-    if 'repeat' in locations:
-        update_button(res, "end_demo_repeat", {"x": locations['repeat']['x'], "y": locations['repeat']['y']})
-
-    logging.info(switch_raido_location)
-
-    # Simulation Speed가 있을 때만 업데이트
-    if 'simulation speed' in switch_raido_location:
-        update_button(res, "simulation_speed", {"x": switch_raido_location['simulation speed']['x'], "y": switch_raido_location['simulation speed']['y']})
-
-    # Night Mode가 있을 때만 업데이트
-    if 'night mode' in switch_raido_location:
-        update_button(res, "night_mode", {"x": switch_raido_location['night mode']['x'], "y": switch_raido_location['night mode']['y']})
-
-
-    # 최종 상태 다시 불러와서 반환
-    button_info = call_button_info(res)
-    return button_info
-
-def open_navi_setting(device):
-    #1. 설정이 이미 있는지 확인
-    set_locations = func_ui_class.find_location_by_UI_class(device, ['설정','Settings'], package_name='navis.ncn.navi')
-    if set_locations and isinstance(set_locations, dict):
-        print('already setting menu opened')
-        return True
-    #2. 설정이 안열려 있는 경우
-    location = func_ui_class.find_setting_icon_by_UI(device)
-    if location is None:
-        print(f"not found setting icon.... ")
-        logging.info("not found setting icon....")
-        return False
-    one_finger_touch(device,location)
-
-    #3. 설정 아이콘이 오픈안됫을 때
-    set_locations = func_ui_class.find_location_by_UI_class(device, ['설정','Settings'])
-    if not set_locations or not isinstance(set_locations, dict):
-        logging.warning("텍스트 인식을 실패했거나 감지된 키워드가 없습니다. - 설정','Settings")
-        print('click setting icon.')
-        return False
-    return True
-
-def go_to_eng_mode(device):
-    # 1. 설정 메뉴 열기
-    if not open_navi_setting(device):
-        return False
-        
-    time.sleep(0.1)
-    device_type, res_x, res_y = get_device_type_and_res(device)
-    swipe_x = int(res_x * 0.25)
-    swipe_start_y = int(res_y * 0.7)
-    swipe_end_y = int(res_y * 0.3)
-    swipe_window(
-        device, 
-        pos1={'x': swipe_x, 'y': swipe_start_y}, 
-        pos2={'x': swipe_x, 'y': swipe_end_y}, 
-        duration=300
-    )
-    # 2. 1차 UI 검색
-    locations = func_ui_class.find_location_by_UI_class(device, ['개발 설정', 'engineering'])
-    logging.info(f"1차 매칭 결과: {locations}")
-
-    # 3. 비활성화 상태인 경우에만 activate_eng 및 2차 재시도 실행
-    if not locations or not isinstance(locations, dict):
-        logging.warning("engineering mode 비활성화 상태. 활성화(activate_eng) 시도.")
-        activate_eng(device)
-        time.sleep(0.2)
-
-        # activate_eng 수행 후 2차 확인
-        if not open_navi_setting(device):
-            return False
-        locations = func_ui_class.find_location_by_UI_class(device, ['개발 설정', 'engineering'])
         if not locations or not isinstance(locations, dict):
-            logging.warning("활성화 시도 후에도 메뉴를 찾지 못했습니다.")
+            logging.warning("텍스트 인식을 실패했거나 감지된 키워드가 없습니다.")
             return False
 
-    # 4. 🎯 위치를 찾았다면(1차든 2차든) 바로 터치 후 종료!
-    eng_key = 'engineering' if 'engineering' in locations else '개발 설정'
-    if eng_key in locations:
-        eng_pos = locations[eng_key]
-        logging.info(f"히든 메뉴 감지 ({eng_key}): {eng_pos}")
-        one_finger_touch(device, eng_pos)
-        # 1. 마찬가지로 스레드로 백그라운드 연산 유도
-        time.sleep(0.1)  # 팝업 전환 및 버퍼링 대기시간 확보
-        update_button_location_in_eng_mode(device)
-        time.sleep(0.1)  # 팝업 전환 및 버퍼링 대기시간 확보
-        return True
-    return False
-
-def activate_eng(device):
-    '''
-    eng mode 해제.
-    1. 설정 버튼 누름
-    2. 안내 종료 위치 확인 및 아래 칸 위치 조정
-    3. 안내 종료 밑에 빈 칸을 10번 누름
-    4. 비밀번호 해제 전달 // 프로젝트 찾아야함...
-    5. 확인 누름
-    '''
-    device_type, res_x, res_y = get_device_type_and_res(device)
-    res = device["resolution"]
-    button_info = call_button_info(res)
-    setting_flag = open_navi_setting(device)
-    if not setting_flag:
-        return False
-
-    #스크롤 한번 하기
-    device_type, res_x, res_y = get_device_type_and_res(device)
-    swipe_x = int(res_x * 0.25)
-    swipe_start_y = int(res_y * 0.7)
-    swipe_end_y = int(res_y * 0.3)
-    swipe_window(
-        device, 
-        pos1={'x': swipe_x, 'y': swipe_start_y}, 
-        pos2={'x': swipe_x, 'y': swipe_end_y}, 
-        duration=300
-    )
-
-    #설정 창 들어갔으니 설정 뒤로가기 끄기 업데이트
-    setting_back_off = func_ui_class.find_setting_back_off_button_by_UI(device)
-    update_button(res, "ui_set_back", {"x":setting_back_off['ui_set_back']['x'],"y":setting_back_off['ui_set_back']['y']})
-    update_button(res, "ui_set_off", {"x":setting_back_off['ui_set_off']['x'],"y":setting_back_off['ui_set_off']['y']})
-
-    locations = func_ui_class.find_location_by_UI_class(device, ['개발 설정','engineering','stop navigation',"안내종료"])
-    logging.info(f"매칭 결과: {locations}")
-
-    if not locations or not isinstance(locations, dict):
-        logging.warning("텍스트 인식을 실패했거나 감지된 키워드가 없습니다.")
-        return False
-
-    
-    if 'engineering' in locations or '개발 설정' in locations:
-        eng_key = 'engineering' if 'engineering' in locations else '개발 설정'
-        eng_pos = locations[eng_key]
-        logging.info(f"🚀 히든 메뉴 감지 ({eng_key}): {eng_pos}")
-        update_button(res, "eng_hidden", {"x":eng_pos['x'],"y":eng_pos['y']})
-        one_finger_touch(device, eng_pos)
-        print('already eng mode activated, start check button positions')
-        # 1. 마찬가지로 스레드로 백그라운드 연산 유도
-        # update_button_location_in_eng_mode(device)
-        # 2. 💡 스크린샷 확보를 위한 대기 타임
-        button_info = call_button_info(res)
-        one_finger_touch(device, button_info['eng_back'])
-        one_finger_touch(device,button_info['ui_set_off'])
-        return False
         
-    # 2. Stop Navigation 또는 안내종료가 감지된 경우 (엔지니어링 모드 활성화 빌드업)
-    if 'stop navigation' in locations or '안내종료' in locations:
-        navi_key = 'stop navigation' if 'stop navigation' in locations else '안내종료'
-        stop_navi_location = locations[navi_key]
-        logging.info(f'stop_navi_location - {stop_navi_location}')
-        update_button(res, "ui_guidance_off", stop_navi_location)
-        update_button(res, "eng_hidden", {"x":stop_navi_location['x'],"y":stop_navi_location['y']+120})
-        update_button(res, "eng_menu", {"x":stop_navi_location['x'],"y":stop_navi_location['y']+240})
+        if 'engineering' in locations or '개발 설정' in locations:
+            eng_key = 'engineering' if 'engineering' in locations else '개발 설정'
+            eng_pos = locations[eng_key]
+            logging.info(f"🚀 히든 메뉴 감지 ({eng_key}): {eng_pos}")
+            update_button(self.res, "eng_hidden", {"x":eng_pos['x'],"y":eng_pos['y']})
+            self.one_finger_touch(eng_pos)
+            print('already eng mode activated, start check button positions')
+            # 1. 마찬가지로 스레드로 백그라운드 연산 유도
+            # update_button_location_in_eng_mode(device)
+            # 2. 💡 스크린샷 확보를 위한 대기 타임
+            self.one_finger_touch(self.button_info['eng_back'])
+            self.one_finger_touch(self.button_info['ui_set_off'])
+            return False
+            
+        # 2. Stop Navigation 또는 안내종료가 감지된 경우 (엔지니어링 모드 활성화 빌드업)
+        if 'stop navigation' in locations or '안내종료' in locations:
+            navi_key = 'stop navigation' if 'stop navigation' in locations else '안내종료'
+            stop_navi_location = locations[navi_key]
+            logging.info(f'stop_navi_location - {stop_navi_location}')
+            update_button(self.res, "ui_guidance_off", stop_navi_location)
+            update_button(self.res, "eng_hidden", {"x":stop_navi_location['x'],"y":stop_navi_location['y']+120})
+            update_button(self.res, "eng_menu", {"x":stop_navi_location['x'],"y":stop_navi_location['y']+240})
 
-    button_info = call_button_info(res)
-    for _ in range(12):
-        one_finger_touch(device,button_info['eng_hidden'])
+        for _ in range(12):
+            self.one_finger_touch(self.button_info['eng_hidden'])
+            time.sleep(0.1)
+        confdata = configus.load_config('resources/configs/config.json')
+        
+        text = confdata.get('activated_eng_mode', {}).get(self.device_type, '')
+        #잘못된 입력 지우기 위해 추가.
+        for _ in range(3):
+            send_keyevent(self.device, 67)
         time.sleep(0.1)
-    confdata = configus.load_config('resources/configs/config.json')
-    
-    text = confdata.get('activated_eng_mode', {}).get(device_type, '')
-    #잘못된 입력 지우기 위해 추가.
-    for _ in range(3):
-        send_keyevent(device, 67)
-    time.sleep(0.1)
-    input_text(device,text)
-    # ----------------------------------------------------
-    # 1번째 '확인' 클릭
-    # ----------------------------------------------------
-    locations = func_ui_class.find_location_by_UI_class(device, letters=['확인'])
+        input_text(self.device,text)
+        # ----------------------------------------------------
+        # 1번째 '확인' 클릭
+        # ----------------------------------------------------
+        locations = func_ui_class.find_location_by_UI_class(self.device, letters=['확인'])
 
-    # locations가 딕셔너리이고 '확인' 키가 실제로 존재하는지 안전하게 검사
-    if isinstance(locations, dict) and locations.get('확인'):
-        one_finger_touch(device, locations['확인'])
-        logging.info(f"첫 번째 '확인' 클릭 성공: {locations['확인']}")
-    else:
-        logging.warning("첫 번째 '확인' 키를 찾지 못했습니다. (KeyError 방지 처리됨)")
+        # locations가 딕셔너리이고 '확인' 키가 실제로 존재하는지 안전하게 검사
+        if isinstance(locations, dict) and locations.get('확인'):
+            self.one_finger_touch(locations['확인'])
+            logging.info(f"첫 번째 '확인' 클릭 성공: {locations['확인']}")
+        else:
+            logging.warning("첫 번째 '확인' 키를 찾지 못했습니다. (KeyError 방지 처리됨)")
 
-    time.sleep(0.2)  # 팝업 전환 및 버퍼링 대기시간 확보
+        time.sleep(0.2)  # 팝업 전환 및 버퍼링 대기시간 확보
 
-    # ----------------------------------------------------
-    # 2번째 '확인' 클릭
-    # ----------------------------------------------------
-    locations = func_ui_class.find_location_by_UI_class(device, letters=['확인'])
-    if isinstance(locations, dict) and locations.get('확인'):
-        one_finger_touch(device, locations['확인'])
-        logging.info(f"두 번째 '확인' 클릭 성공: {locations['확인']}")
-    else:
-        logging.warning("두 번째 '확인' 키를 찾지 못했습니다. (KeyError 방지 처리됨)")
+        # ----------------------------------------------------
+        # 2번째 '확인' 클릭
+        # ----------------------------------------------------
+        locations = func_ui_class.find_location_by_UI_class(self.device, letters=['확인'])
+        if isinstance(locations, dict) and locations.get('확인'):
+            self.one_finger_touch(locations['확인'])
+            logging.info(f"두 번째 '확인' 클릭 성공: {locations['확인']}")
+        else:
+            logging.warning("두 번째 '확인' 키를 찾지 못했습니다. (KeyError 방지 처리됨)")
+            
+        # 2. 💡 스크린샷 확보를 위한 대기 타임
+        self.one_finger_touch(self.button_info['eng_back'])
+        self.one_finger_touch(self.button_info['ui_set_off'])
+
+    def update_button_location_in_eng_mode(self):
+        res = self.device['resolution']
+        target_letters = ['개발 설정', 'engineering', 'start', 'stop', 'pause', 'repeat']
+        locations = func_ui_class.find_location_by_UI_class(self.device, target_letters)
+        time.sleep(0.1)
+        eng_locations = func_ui_class.find_eng_back_button_by_UI(self.device)
+        time.sleep(0.1)
+        switch_raido_location = func_ui_class.find_eng_swith_text_by_UI(self.device,['simulation speed', 'night mode'])
+        time.sleep(0.1)
         
+        # 1. 진입 기준점 확인 (메인 메뉴 둘 다 없으면 진행 불가하므로 이 단계만 방어)
+        if '개발 설정' not in locations and 'engineering' not in locations:
+            logging.error("기준 메뉴('개발 설정'/'Engineering')를 찾지 못해 업데이트를 스킵합니다.")
+            return self.button_info
 
+        # 메인 메뉴 기준 좌표 지정
+        navi_key = '개발 설정' if '개발 설정' in locations else 'engineering'
+        Engineering = locations[navi_key]
 
+        # 공통/기본 메뉴 업데이트
+        if eng_locations is not None:
+            update_button(res, "eng_back", {"x": eng_locations['x'], "y": eng_locations['y']})
 
-    # 2. 💡 스크린샷 확보를 위한 대기 타임
-    button_info = call_button_info(res)
-    one_finger_touch(device, button_info['eng_back'])
-    one_finger_touch(device,button_info['ui_set_off'])
-    
-def select_latter_eng(device,search_latter):
-    device_type, res_x, res_y = get_device_type_and_res(device)
-    res = device['resolution']
-    button_info = call_button_info(res)
-    eng_flag = go_to_eng_mode(device)
-    if not eng_flag:
-        return False  # 기존 return 0 대신 확실한 실패 플래그 반환
-    scroll_flag = swipe_window_til_latter(device,search_latter)
-    if not scroll_flag:
-        print(f" {search_latter} UI 탐색 실패")
-        return False
-    location = func_ui_class.find_location_by_UI_class(device,letters=[search_latter])
-    logging.info(f'location - {location}')
-    if location is None:
-        print(f'please check {search_latter} in eng mode')
-        return 0
-    else:
-        one_finger_touch(device, location[search_latter.lower()])
-        # 7. 화면 닫기 및 정리 (button_info 딕셔너리가 전역 또는 내부에 선언되어 있다고 가정)
-    try:
-        one_finger_touch(device, button_info['eng_back'])
-        one_finger_touch(device, button_info['ui_set_off'])
-    except NameError:
-        logging.warning("button_info 정의를 찾을 수 없어 화면 닫기 단계를 스킵합니다.")
-        return 0
+        # 데모 제어 버튼들 각각 개별 체크 후 업데이트
+        if 'start' in locations:
+            update_button(res, "end_demo_on", {"x": locations['start']['x'], "y": locations['start']['y']})
+            
+        if 'stop' in locations:
+            update_button(res, "end_demo_stop", {"x": locations['stop']['x'], "y": locations['stop']['y']})
+            
+        if 'pause' in locations:
+            update_button(res, "end_demo_pause", {"x": locations['pause']['x'], "y": locations['pause']['y']})
+            
+        if 'repeat' in locations:
+            update_button(res, "end_demo_repeat", {"x": locations['repeat']['x'], "y": locations['repeat']['y']})
 
-def select_latter_box_eng(device, search_latter, value):
-    device_type, res_x, res_y = get_device_type_and_res(device)
-    res = device['resolution']
-    button_info = call_button_info(res)
-    # 1. 초기 엔지니어 모드 진입 및 방어
-    eng_flag = go_to_eng_mode(device)
-    if not eng_flag:
-        logging.error("엔지니어 모드 진입 실패")
-        return False  
-        
-    # 2. 목표 메뉴 스크롤 탐색
-    scroll_flag = swipe_window_til_latter(device, search_latter)
-    if not scroll_flag:
-        print(f"❌ {search_latter} UI 탐색 실패")
-        return False
-    
-    # 3. 스크롤이 완료되어 화면에 확보되었으므로 스위치/텍스트 필드 정보 로드
-    locations = func_ui_class.find_eng_swith_text_by_UI(device, letters=[search_latter])
-    logging.info(f"검색된 UI 목록: {locations}")
-    
-    # 4. [대소문자 방어 및 키워드 매칭] 
-    # find_eng_swith_text_by_UI 결과가 소문자로 올 수 있으므로 유연하게 대조
-    mv_key = next((k for k in locations if k.lower() == search_latter.lower()), None)
+        logging.info(switch_raido_location)
 
-    if mv_key is None:
-        logging.warning(f"❌ '{search_latter}' 관련 메뉴의 컴포넌트를 찾지 못했습니다.")
-        return False
-        
-    # 매칭된 텍스트 필드/메뉴의 실제 좌표 추출
-    matched_location = locations[mv_key]
-   
-    # 5. 입력창 선택 및 기존 값 청소
-    one_finger_touch(device, matched_location)  # [교정] locations 대신 매칭된 좌표 전달
-    if value =='-':
-        logging.info(f'radio icon -{matched_location}. finish')
+        # Simulation Speed가 있을 때만 업데이트
+        if 'simulation speed' in switch_raido_location:
+            update_button(res, "simulation_speed", {"x": switch_raido_location['simulation speed']['x'], "y": switch_raido_location['simulation speed']['y']})
+
+        # Night Mode가 있을 때만 업데이트
+        if 'night mode' in switch_raido_location:
+            update_button(res, "night_mode", {"x": switch_raido_location['night mode']['x'], "y": switch_raido_location['night mode']['y']})
+        return self.button_info
+
+    def select_latter_eng(self,search_latter):
+        eng_flag = self.go_to_eng_mode()
+        if not eng_flag:
+            return False  # 기존 return 0 대신 확실한 실패 플래그 반환
+        scroll_flag = self.swipe_window_til_latter(search_latter)
+        if not scroll_flag:
+            print(f" {search_latter} UI 탐색 실패")
+            return False
+        location = func_ui_class.find_location_by_UI_class(self.device,letters=[search_latter])
+        logging.info(f'location - {location}')
+        if location is None:
+            print(f'please check {search_latter} in eng mode')
+            return 0
+        else:
+            self.one_finger_touch(location[search_latter.lower()])
+            # 7. 화면 닫기 및 정리 (self.button_info 딕셔너리가 전역 또는 내부에 선언되어 있다고 가정)
         try:
-            one_finger_touch(device, button_info['eng_back'])
-            one_finger_touch(device, button_info['ui_set_off'])
+            self.one_finger_touch(self.button_info['eng_back'])
+            self.one_finger_touch(self.button_info['ui_set_off'])
         except NameError:
-            logging.warning("button_info 정의를 찾을 수 없어 화면 닫기 단계를 스킵합니다.")
-        return True
-    #time.sleep(0.1)
-    
-    # Backspace(67) 3번, Delete(112) 3번으로 기존 텍스트 클리어
-    for _ in range(3): send_keyevent(device, 67)
-    for _ in range(3): send_keyevent(device, 112)
-    
-    # 6. 새 값 입력 및 엔터(66)
-    input_text(device, value)
-    send_keyevent(device, 66)
-    #time.sleep(0.1)
-    #TODO: 확인 버튼 찾아서 닫기 눌러야함.
-    locations = func_ui_class.find_location_by_UI_class(device, letters=['확인'],package_name="com.android.inputmethod.keyboard.Key")
+            logging.warning("self.button_info 정의를 찾을 수 없어 화면 닫기 단계를 스킵합니다.")
+            return 0
 
-    # locations가 딕셔너리이고 '확인' 키가 실제로 존재하는지 안전하게 검사
-    if isinstance(locations, dict) and locations.get('확인'):
-        one_finger_touch(device, locations['확인'])
-        logging.info(f"'확인' 클릭 성공: {locations['확인']}")
-    else:
-        logging.warning("'확인' 키를 찾지 못했습니다. (KeyError 방지 처리됨)")
+    def select_latter_box_eng(self, search_latter, value):
+        res = self.device['resolution']
+        # 1. 초기 엔지니어 모드 진입 및 방어
+        eng_flag = self.go_to_eng_mode()
+        if not eng_flag:
+            logging.error("엔지니어 모드 진입 실패")
+            return False  
+            
+        # 2. 목표 메뉴 스크롤 탐색
+        scroll_flag = self.swipe_window_til_latter(search_latter)
+        if not scroll_flag:
+            print(f"❌ {search_latter} UI 탐색 실패")
+            return False
+        
+        # 3. 스크롤이 완료되어 화면에 확보되었으므로 스위치/텍스트 필드 정보 로드
+        locations = func_ui_class.find_eng_swith_text_by_UI(self.device, letters=[search_latter])
+        logging.info(f"검색된 UI 목록: {locations}")
+        
+        # 4. [대소문자 방어 및 키워드 매칭] 
+        # find_eng_swith_text_by_UI 결과가 소문자로 올 수 있으므로 유연하게 대조
+        mv_key = next((k for k in locations if k.lower() == search_latter.lower()), None)
 
+        if mv_key is None:
+            logging.warning(f"❌ '{search_latter}' 관련 메뉴의 컴포넌트를 찾지 못했습니다.")
+            return False
+            
+        # 매칭된 텍스트 필드/메뉴의 실제 좌표 추출
+        matched_location = locations[mv_key]
     
-    # 7. 화면 닫기 및 정리 (button_info 딕셔너리가 전역 또는 내부에 선언되어 있다고 가정)
-    try:
-        one_finger_touch(device, button_info['eng_back'])
-        one_finger_touch(device, button_info['ui_set_off'])
-    except NameError:
-        logging.warning("button_info 정의를 찾을 수 없어 화면 닫기 단계를 스킵합니다.")
-    return True  # 최종 성공 플래그 반환
+        # 5. 입력창 선택 및 기존 값 청소
+        self.one_finger_touch(matched_location)  # [교정] locations 대신 매칭된 좌표 전달
+        if value =='-':
+            logging.info(f'radio icon -{matched_location}. finish')
+            try:
+                self.one_finger_touch(self.button_info['eng_back'])
+                self.one_finger_touch(self.button_info['ui_set_off'])
+            except NameError:
+                logging.warning("self.button_info 정의를 찾을 수 없어 화면 닫기 단계를 스킵합니다.")
+            return True
+        #time.sleep(0.1)
+        
+        # Backspace(67) 3번, Delete(112) 3번으로 기존 텍스트 클리어
+        for _ in range(3): send_keyevent(self.device, 67)
+        for _ in range(3): send_keyevent(self.device, 112)
+        
+        # 6. 새 값 입력 및 엔터(66)
+        input_text(self.device, value)
+        send_keyevent(self.device, 66)
+        #time.sleep(0.1)
+        #TODO: 확인 버튼 찾아서 닫기 눌러야함.
+        locations = func_ui_class.find_location_by_UI_class(self.device, letters=['확인'],package_name="com.android.inputmethod.keyboard.Key")
 
-def set_demo_speed(device,value):
-    device_type, res_x, res_y = get_device_type_and_res(device)
-    res = device['resolution']
-    button_info = call_button_info(res)
-    #eng mode 진입
-    # 엔지니어 모드 진입
-    eng_flag = go_to_eng_mode(device)
-    if not eng_flag:
-        print('set demo speed failed')
+        # locations가 딕셔너리이고 '확인' 키가 실제로 존재하는지 안전하게 검사
+        if isinstance(locations, dict) and locations.get('확인'):
+            self.one_finger_touch(locations['확인'])
+            logging.info(f"'확인' 클릭 성공: {locations['확인']}")
+        else:
+            logging.warning("'확인' 키를 찾지 못했습니다. (KeyError 방지 처리됨)")
+
+        
+        # 7. 화면 닫기 및 정리 (self.button_info 딕셔너리가 전역 또는 내부에 선언되어 있다고 가정)
+        try:
+            self.one_finger_touch(self.button_info['eng_back'])
+            self.one_finger_touch(self.button_info['ui_set_off'])
+        except NameError:
+            logging.warning("self.button_info 정의를 찾을 수 없어 화면 닫기 단계를 스킵합니다.")
+        return True  # 최종 성공 플래그 반환
+
+    def set_demo_speed(self,value):
+        # 엔지니어 모드 진입
+        eng_flag = self.go_to_eng_mode()
+        if not eng_flag:
+            print('set demo speed failed')
+            return 0
+
+        self.one_finger_touch(self.button_info['simulation_speed'])
+        # 기존 텍스트 지우기 및 새 값 입력 // backspace 3번 delete 3번
+        send_keyevent(self.device,67)
+        send_keyevent(self.device,67)
+        send_keyevent(self.device,67)
+        send_keyevent(self.device,112)
+        send_keyevent(self.device,112)
+        send_keyevent(self.device,112)
+        input_text(self.device, value)
+        send_keyevent(self.device,66)
+        self.one_finger_touch(self.button_info['eng_back'])
+        self.one_finger_touch(self.button_info['ui_set_off'])
         return 0
 
-    one_finger_touch(device, button_info['simulation_speed'])
-    # 기존 텍스트 지우기 및 새 값 입력 // backspace 3번 delete 3번
-    send_keyevent(device,67)
-    send_keyevent(device,67)
-    send_keyevent(device,67)
-    send_keyevent(device,112)
-    send_keyevent(device,112)
-    send_keyevent(device,112)
-    input_text(device, value)
-    send_keyevent(device,66)
-    one_finger_touch(device,button_info['eng_back'])
-    one_finger_touch(device,button_info['ui_set_off'])
-    return 0
-
-def set_demo_mode(device,value):
-    '''
-    데모모드 설정
-    value = START , STOP, PAUSE, REPEAT
-    
-    '''
-    steps = ["START", "STOP", "PAUSE", "REPEAT"]
-    if value not in steps:
-        print(f"유효하지 않은 value가 입력되었습니다: {value} (지원 목록: START, STOP, PAUSE, REPEAT)")
+    def set_demo_mode(self,value):
+        steps = ["START", "STOP", "PAUSE", "REPEAT"]
+        if value not in steps:
+            print(f"유효하지 않은 value가 입력되었습니다: {value} (지원 목록: START, STOP, PAUSE, REPEAT)")
+            return 0
+        self.select_latter_eng(value)
         return 0
-    select_latter_eng(device,value)
-    return 0
 
+    def set_guidance_off(self):
+        self.open_navi_setting()
+        self.one_finger_touch(self.button_info['ui_guidance_off'])
+
+    def swipe_window_til_latter(self, latter, x_latters=['개발 설정', 'engineering']):
+        '''
+        화면을 스크롤하며 목표 UI(latter: string)를 탐색합니다.
+        화면 바닥에 도달하거나 정체되면 False를, 찾으면 좌표 지점을 리턴합니다.
+        '''
+        # 1. 기준점(X좌표용) 탐색
+        locations = func_ui_class.find_location_by_UI_class(self.device, x_latters)
+        logging.info(f"기준점 탐색 결과: {locations}")
+        
+        # 2. x_latters 중 화면에 존재하는 기준점 채택
+        navi_key = None
+        for target in x_latters:
+            if target in locations:
+                navi_key = target
+                break
+                
+        if not navi_key:
+            logging.error(f"제시된 기준 메뉴 {x_latters}를 찾지 못해 업데이트를 스킵합니다.")
+            return False
+
+        location = locations[navi_key]
+        
+        # 해상도 기반 스크롤 영역 계산
+        swipe_start_y = int(self.res_y * 0.7)
+        swipe_end_y = int(self.res_y * 0.3)
+        
+        # 클릭 안전 y 범위 설정 (0 <= y <= res_y * 0.9)
+        max_safe_y = self.res_y * 0.9
+        
+        prev_xml = ''
+        
+        while True:
+            time.sleep(0.1)
+            # 3. 현재 화면에서 목표 string(latter) 검색
+            current_locations = func_ui_class.find_location_by_UI_class(self.device, [latter])
+            
+            # [교정] 대소문자 무시하고 키 매칭 수행
+            matched_key = next((k for k in current_locations if k.lower() == latter.lower()), None)
+
+            # 4. 일치하는 키를 찾았고, Y 좌표가 화면 안전 범위(0 ~ 90%) 내에 있는 경우에만 리턴
+            if matched_key:
+                target_pos = current_locations[matched_key]
+                target_y = target_pos.get('y', 0)
+                
+                if 0 <= target_y <= max_safe_y:
+                    logging.info(f"🎯목표 UI '{latter}' 발견! (매칭된 키: {matched_key}, Y: {target_y}) 지점 리턴: {target_pos}")
+                    return target_pos
+                else:
+                    logging.info(f"👀 UI '{latter}'를 발견했지만 화면 하단 짤림 영역(Y: {target_y} > {max_safe_y})에 있어 스크롤을 더 진행합니다.")
+
+            # 5. 스크롤 전 현재 화면의 UI XML 상태 백업
+            current_xml = d.dump_hierarchy(compressed=False, pretty=True)
+            
+            # 6. 이전 XML과 똑같다면 화면 바닥에 도달한 것이므로 종료
+            if prev_xml == current_xml:
+                logging.warning(f"스크롤 종료: '{latter}'를 찾지 못하고 화면 끝에 도달했습니다.")
+                print(f"스크롤 종료: '{latter}'를 찾지 못하고 화면 끝에 도달했습니다.")
+                return False
+                
+            prev_xml = current_xml
+
+            # 7. 찾지 못했거나 화면 범위 밖에 있으므로 스크롤 다운 수행
+            logging.info(f"Searching... '{latter}' 탐색을 위해 스크롤 진행")
+            self.swipe_window(
+                pos1={'x': location['x'], 'y': swipe_start_y}, 
+                pos2={'x': location['x'], 'y': swipe_end_y}, 
+                duration=300
+            )
  # ================== FTS function ==================
-
-def set_guidance_off(device):
-    device_type, res_x, res_y = get_device_type_and_res(device)
-    res = device['resolution']
-    button_info = call_button_info(res)
-    open_navi_setting(device)
-    one_finger_touch(device,button_info['ui_guidance_off'])
-
-
 #--------------------------------- 키보드 및 입력 기능 함수 ---------------------------------
+
+class KeyboardController:
+    """디바이스 키보드 입력을 제어하는 클래스."""
+    LANG_MAP = {
+        "KR": ["한국어", "korean", "ko"],
+        "EN": ["english", "영어", "en"],
+        "JP": ["日本語", "japanese", "일본어", "ja"],
+        "ZH": ["中文", "chinese", "중국어", "zh"],
+    }
+    LANG_CHAR_MAP = {
+        "KR": set("ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎㅏㅑㅓㅕㅗㅛㅜㅠㅡㅣㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔ"),
+        "EN": set("abcdefghijklmnopqrstuvwxyz"),
+        "JP": set("あかさたなはまやらわアカサタナハマヤラワ"),
+        "ZH": set("ㄅㄆㄇㄈㄉㄊㄋㄌ"),
+    }
+    SHIFT_CHAR_MAP = {
+        "ㄲ": "ㄱ",
+        "ㄸ": "ㄷ",
+        "ㅃ": "ㅂ",
+        "ㅆ": "ㅅ",
+        "ㅉ": "ㅈ",
+        "ㅒ": "ㅐ",
+        "ㅖ": "ㅔ",
+    }
+    KEYBOARD_IDENTIFIERS = ["com.samsung.android.honeyboard", "inputmethod", "keyboard"]
+    def __init__(
+        self,
+        device_dict: dict,
+    ):
+        """
+        :param device_dict: 'ppadb_device', 'u2_device', 'resolution' 등을 포함하는 딕셔너리
+        :param keyboard_json_path: 키보드 매핑 좌표가 저장될 JSON 경로
+        """
+        self.device_dict = device_dict
+        self.ppadb_dev = device_dict.get("ppadb_device")
+        self.u2_dev = device_dict.get("u2_device")
+        self.resolution = device_dict.get("resolution", "")
+        self.serial = getattr(self.ppadb_dev, "serial", "UNKNOWN")
+        self.keyboard_json_path = r'resources/configs/keyboard.json'
+        self.current_keyboard_lang = None
+
+    def input_text(self, text):
+        """
+        ppadb의 device_obj를 사용하여 텍스트를 입력합니다.
+        공백은 안드로이드 input 시스템이 인식하도록 %s로 치환하여 전달합니다.
+        """
+        # 2. 텍스트 안전 처리 (공백 치환)
+        if isinstance(text, (int, float)):
+            safe_text = str(text)
+        else:
+            safe_text = str(text).replace(" ", "%s")
+
+        command = f'input text "{safe_text}"'
+        
+        try:
+            logging.info(f"Input Text: {text} (Encoded: {safe_text})")
+            self.ppadb_dev.shell(command)
+            return 0
+        except Exception as e:
+            logging.error(f"Input Text Error {e}")
+            return -1
+
+    def send_keyevent(self, keycode):
+        """
+        ppadb의 device_obj를 사용하여 안드로이드 키 이벤트를 전송합니다.
+        주요 키코드:
+        3  - Home
+        4  - Back
+        66 - Enter
+        67 - Backspace
+        """
+        serial = self.ppadb_dev.serial
+        # 2. 명령어 구성
+        command = f"input keyevent {keycode}"
+        
+        try:
+            logging.info(f"[{serial}] Send Keyevent: {keycode}")
+            
+            # 3. ppadb를 통한 실행
+            self.ppadb_dev.shell(command)
+            
+            return 0
+        except Exception as e:
+            logging.error(f"[{serial}] Send Keyevent Error: {e}")
+            return -1
+        
+
 def decompose_text(text):
     """
     한글(자모 및 이중모음/쌍자음/겹받침 분리), 영어, 숫자, 특수문자가 섞인 텍스트를 

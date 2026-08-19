@@ -184,14 +184,14 @@ def scroll_map_to_location_old(
                         f"🔍 [Final Scale] 현재({current_scale_km}km) > 0.05km -> Zoom In"
                     )
                     zoom_in_simple(device)
-                elif current_scale_km < 0.01:
+                elif current_scale_km < 0.03:
                     logging.info(
                         f"🚀 [Final Scale] 현재({current_scale_km}km) < 0.05km -> Zoom Out"
                     )
                     zoom_out_simple(device)
                 else:
                     logging.info(
-                        f"✅ 최종 50m 스케일 세팅 완료! (현재: {current_scale_km}km)"
+                        f"✅ 최종 50m 스케일 세팅 완료! (현재 맵 스케일: {current_scale_km}km)"
                     )
                     break
 
@@ -408,7 +408,8 @@ def scroll_map_to_location(
         # 동일 스케일이 3회 이상 유지되면서 거리가 더 좁혀지지 않고 주변에서 맴돌 때
         force_zoom_in = False
         if scale_same_count >= 3 and prev_distance is not None:
-            if distance_m >= prev_distance * 0.8:
+            # [수정] 남은 거리가 1km 이하일 때만 오버슈팅으로 판단하도록 조건 완화
+            if distance_m >= prev_distance * 0.8 and distance_m <= 1000:
                 logging.warning(
                     f"⚠️ [{scale_same_count}회 연속 동일 스케일({current_scale_km}km)] "
                     f"오버슈팅 감지(남은거리: {distance_m:.1f}m) -> 강제 Zoom In 실행 및 Zoom Out 금지 설정"
@@ -513,14 +514,13 @@ def scroll_map_to_location(
     )
     return False
 
-
 def debug_mode():
     # call_device.start_adb_server()
     devices = call_device.discover_and_connect_device()
     # ios_control = func_ios.IOSDeviceController(lockdown_device=devices[1]['lockdown_device'])
     # ios_control.download_photos_by_date('2026-07-16')
     
-    target_model = 'SM-A566S'
+    target_model = 'SM-X820'
     device = next((d for d in devices if d.get('model') == target_model), None)
     
     if not device:
@@ -531,26 +531,19 @@ def debug_mode():
     logmanager.start_live_logging()
     time.sleep(5)
 
-    # 1. 다운로드 폴더 내 CSV 파일 경로 설정
-    download_path = os.path.join(os.path.expanduser('~'), 'Downloads', '노면색깔유도선_WGS84_부산.csv')
-    csv_file_path = download_path
-    save_encoding = 'cp949'
+    # 1. 다운로드 폴더 내 Excel 파일 경로 설정
+    download_path = os.path.join(os.path.expanduser('~'), 'Downloads', '노면색깔유도선_WGS84_부산_위치별정리.xlsx')
+    excel_file_path = download_path
 
-    # 2. CSV 파일 읽기 (인코딩 예외 처리)
+    # 2. Excel 파일 읽기
     try:
-        df = pd.read_csv(download_path, encoding='cp949')
-        save_encoding = 'cp949'
-    except (UnicodeDecodeError, FileNotFoundError):
-        try:
-            df = pd.read_csv(download_path, encoding='utf-8-sig')
-            save_encoding = 'utf-8-sig'
-        except FileNotFoundError:
-            # 상대 경로 또는 현재 작업 디렉터리의 Downloads 확인
-            csv_file_path = '노면색깔유도선_WGS84.csv'
-            df = pd.read_csv(csv_file_path, encoding='cp949')
-            save_encoding = 'cp949'
+        df = pd.read_excel(download_path)
+    except FileNotFoundError:
+        # 상대 경로 또는 현재 작업 디렉터리의 Downloads 확인
+        excel_file_path = '노면색깔유도선_WGS84.xlsx'
+        df = pd.read_excel(excel_file_path)
 
-    # 3. 'screenshot_path' 컬럼 위치를 '좌표값' 바로 옆에 설정
+    # 3. 'screenshot_path' 컬럼 위치를 '좌표값' 또는 '경도' 바로 옆에 설정
     if 'screenshot_path' not in df.columns:
         if '좌표값' in df.columns:
             target_idx = df.columns.get_loc('좌표값') + 1
@@ -561,11 +554,22 @@ def debug_mode():
             
         df.insert(target_idx, 'screenshot_path', None)
 
-    # 4. CSV의 각 행을 순회하면서 위도/경도 추출 후 실행
+    # 컬럼의 dtype 자체를 object(문자열 가능)로 변환 (루프 시작 전 1회만 실행)
+    df['screenshot_path'] = df['screenshot_path'].astype(object)
+
+    # 4. Excel의 각 행을 순회하면서 위도/경도 추출 후 실행
     total_count = len(df)
     
     for index, row in df.iterrows():
-        # '좌표값' 컬럼이 있는 경우 고정밀도 소수점을 위해 사용, 없을 경우 '위도'/'경도' 컬럼 사용
+        # 1. 이미 screenshot_path 컬럼에 값이 들어있거나, 실제 파일이 존재하는 경우 패스
+        current_path = row.get('screenshot_path')
+        if pd.notna(current_path) and str(current_path).strip() != "":
+            # (선택 사항) 만약 파일이 '실제로 존재하는지'까지 엄격하게 검사하고 싶다면:
+            # if os.path.exists(str(current_path)):
+            print(f"⏩ [{index + 1}/{total_count}] 이미 완료된 항목입니다. (패스): {row.get('자치구', '')}")
+            continue
+
+        # 2. 기존 작업 수행 (좌표 추출 및 지도 이동)
         if '좌표값' in row and pd.notna(row['좌표값']):
             lat, lon = map(float, str(row['좌표값']).split(','))
         else:
@@ -582,17 +586,17 @@ def debug_mode():
         
         screenshot_path = func_record_image.record_screenshot(device=device, log_manager=logmanager)
         
-        # 현재 행의 screenshot_path 기입
+        # 스크린샷 경로 기입
         df.at[index, 'screenshot_path'] = screenshot_path
 
-        # 50개 항목마다 CSV 저장 (또는 50번째 마다)
+        # 50개 항목마다 Excel 저장
         if (index + 1) % 50 == 0:
-            df.to_csv(csv_file_path, index=False, encoding=save_encoding)
-            print(f"💾 [{index + 1}/{total_count}] 50개 항목 완료되어 CSV 저장됨: {csv_file_path}")
+            df.to_excel(excel_file_path, index=False)
+            print(f"💾 [{index + 1}/{total_count}] 50개 항목 완료되어 Excel 저장됨: {excel_file_path}")
 
     # 전체 루프 종료 후 최종 저장
-    df.to_csv(csv_file_path, index=False, encoding=save_encoding)
-    print(f"✅ 모든 작업 완료! 최종 CSV 저장 완료: {csv_file_path}")
+    df.to_excel(excel_file_path, index=False)
+    print(f"✅ 모든 작업 완료! 최종 Excel 저장 완료: {excel_file_path}")
     return 0
 
 

@@ -1,25 +1,24 @@
 {
-    "local_path": "D:\\project\\NKM\\NKM_Tool_Test",
-    "local_path1": "D:\\project\\NKM\\NKM_Tool",
-    "video_recording_duration": 20,
-    "activate_log": true,
-    "log_filter": [
-        "[TTSCtrl] Sentence",
-        "onLLNViewModeChanged {\"isLLNViewMode\":false"
-    ],
-    "log_screenshot_filter": {
-        "LLN_off":"onLLNViewModeChanged",
-        "maneuver_action": "Sentence\\(text : (now|잠시 후)",
-		"onLanesInfoChanged":"onLanesInfoChanged"
-          
-    },
-    "version_filter": {
-        "sw_version": "[VT]\\d{3}\\.\\d{2}_\\d{6}",
-        "map_version": "(?i)(?:versionid|ndsversion)[:\\(\\s]*(\\d{5})"
-    },
-    "activated_eng_mode": {
-        "tablet": "mod@!2026Gnik",
-        "mobile": "mod@!2026Gnik",
-        "twd": "72ym@!2026Mdt"
-    }
+	"local_path": "C:\\Users\\miskang\\Desktop\\NKM_Tool",
+	"local_path1": "D:\\project\\NKM\\NKM_Tool",
+	"video_recording_duration": 20,
+	"activate_log": true,
+	"log_filter": [
+		"[TTSCtrl] Sentence",
+		"onLLNViewModeChanged {\"isLLNViewMode\":false"
+	],
+	"log_screenshot_filter": {
+		"LLN_off": "onLLNViewModeChanged",
+		"maneuver_action": "Sentence\\(text : (now|잠시 후)",
+		"onLanesInfoChanged": "onLanesInfoChanged"
+	},
+	"version_filter": {
+		"sw_version": "[VT]\\d{3}\\.\\d{2}_\\d{6}",
+		"map_version": "(?i)(?:versionid|ndsversion)[:\\(\\s]*(\\d{5})"
+	},
+	"activated_eng_mode": {
+		"tablet": "mod@!2026Gnik",
+		"mobile": "mod@!2026Gnik",
+		"twd": "72ym@!2026Mdt"
+	}
 }
