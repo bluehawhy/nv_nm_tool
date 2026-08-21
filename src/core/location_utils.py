@@ -1,4 +1,5 @@
 import re
+import math
 from ..utils import loggas
 import pandas as pd
 from pyproj import Transformer
@@ -184,3 +185,20 @@ def convert_korea2000_to_wgs_csv(input_path: str, output_path: str = None):
     df.to_csv(output_path, index=False, encoding="utf-8-sig")
     logging.info(f"✅ 좌표 변환 완료! 저장 경로: {output_path}")
 
+def get_distance_and_bearing(lat1, lon1, lat2, lon2):
+    """두 WGS84 좌표 간의 거리(m) 및 dx, dy(m) 차이 계산"""
+    R = 6371000.0  # 지구 반지름 (m)
+
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+
+    a = (math.sin(delta_phi / 2) ** 2 +
+         math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2)
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    distance_m = R * c
+
+    dy_m = delta_phi * R
+    dx_m = delta_lambda * R * math.cos((phi1 + phi2) / 2)
+
+    return distance_m, dx_m, dy_m
