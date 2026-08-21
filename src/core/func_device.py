@@ -5,8 +5,9 @@ import threading
 import xml.etree.ElementTree as ET
 import re
 import json
+import math
 
-from . import func_ui_class
+from . import func_ui_class, location_utils
 from ..utils import configus, loggas
 logging= loggas.logger
 
@@ -289,7 +290,33 @@ class TouchController:
                 return -1
             time.sleep(0.1)
         return 0
-    
+
+    def input_text(self, text):
+        """ppadb를 사용하여 텍스트를 입력합니다. (공백은 %s로 치환)"""
+        if isinstance(text, (int, float)):
+            safe_text = str(text)
+        else:
+            safe_text = str(text).replace(" ", "%s")
+
+        command = f'input text "{safe_text}"'
+        try:
+            logging.info(f"[{self.serial}] Input Text: {text} (Encoded: {safe_text})")
+            self.ppadb_dev.shell(command)
+            return 0
+        except Exception as e:
+            logging.error(f"[{self.serial}] Input Text Error: {e}")
+            return -1
+
+    def send_keyevent(self, keycode):
+        """ppadb를 사용하여 안드로이드 키 이벤트를 전송합니다."""
+        command = f"input keyevent {keycode}"
+        try:
+            logging.info(f"[{self.serial}] Send Keyevent: {keycode}")
+            self.ppadb_dev.shell(command)
+            return 0
+        except Exception as e:
+            logging.error(f"[{self.serial}] Send Keyevent Error: {e}")
+            return -1
 #================================== intergrated func ==================================
 class NaviController(TouchController):
     """
@@ -715,11 +742,229 @@ class NaviController(TouchController):
                 pos2={'x': location['x'], 'y': swipe_end_y}, 
                 duration=300
             )
- # ================== FTS function ==================
-#--------------------------------- 키보드 및 입력 기능 함수 ---------------------------------
 
-class KeyboardController:
+    def zoom_in(self):
+        """단순 1단계 확대"""
+        screen_width, screen_height = map(int, self.device['resolution'].split("x"))
+        center = {"x": screen_width // 2, "y": screen_height // 2}
+        self.one_finger_touch(pos=center)
+        time.sleep(0.1)
+        self.one_finger_touch(pos=center)
+        time.sleep(0.5)
+
+    def zoom_out(self):
+        """단순 1단계 축소 (두 손가락 간격을 100px로 넓혀 명확한 터치 처리)"""
+        screen_width, screen_height = map(int, self.device['resolution'].split("x"))
+        cx, cy = screen_width // 2, screen_height // 2
+        p1 = {"x": cx, "y": cy}
+        p2 = {"x": cx, "y": cy}
+        self.two_finger_touch(pos1=p1, pos2=p2)
+        time.sleep(0.1)
+        self.two_finger_touch(pos1=p1, pos2=p2)
+        time.sleep(0.5)
+
+    def scroll_map_to_location(
+        self, logmanager, target_location, max_attempts=50
+    ):
+        """도착 판정 범위 완화 및 오버슈팅(진동) 감지 시 강제 Zoom In 기능 추가"""
+        THRESHOLD_METERS = 25.0  # 도달 기준 오차 완화
+
+        screen_width, screen_height = map(int, self.device["resolution"].split("x"))
+        center_x, center_y = screen_width // 2, screen_height // 2
+        center_pos = {"x": center_x, "y": center_y}
+
+        attempts = 0
+        target_lat = target_location["latitude"]
+        target_lon = target_location["longitude"]
+
+        # --- 오버슈팅 감지용 변수 ---
+        prev_scale = None
+        scale_same_count = 0
+        prev_distance = None
+        has_overshot = False  # 한번이라도 오버슈팅 감지되면 Zoom Out(스케일 올리기) 차단
+
+        while attempts < max_attempts:
+            attempts += 1
+
+            # 1. 최신 위치 및 스케일 가져오기
+            try:
+                #매번 이동후 1초 대기(정확한 좌표 및 위치 체크를 위해)
+                time.sleep(1)
+                current_log = logmanager.latest_car_pos[1]
+                current_location = location_utils.convert_nds_wgs(
+                    location_utils.ext_nds_pos_from_log(current_log)
+                )
+                current_scale_km = float(
+                    location_utils.parse_map_scale_km(current_log)
+                )
+
+                curr_lat = float(current_location["latitude"])
+                curr_lon = float(current_location["longitude"])
+            except Exception as e:
+                logging.error(f"로그 추출 실패: {e}")
+                return False
+
+            # 2. 남은 거리 계산
+            distance_m, dx_m, dy_m = location_utils.get_distance_and_bearing(
+                curr_lat, curr_lon, target_lat, target_lon
+            )
+            logging.info(
+                f"[{attempts}/{max_attempts}] 위치: ({curr_lat:.5f}, {curr_lon:.5f}) | 스케일: {current_scale_km}km | 남은거리: {distance_m/1000.0:.2f}km ({distance_m:.1f}m)"
+            )
+
+            # 3. 목표 도달 확인 및 50m(0.05km) 최종 스케일 보정
+            if distance_m <= THRESHOLD_METERS:
+                logging.info(
+                    f"🎯 목표 위치 도달! (오차: {distance_m:.1f}m <= {THRESHOLD_METERS}m) -> 50m(0.05km) final scale 보정"
+                )
+
+                for _ in range(6):
+                    current_log = logmanager.latest_car_pos[1]
+                    current_scale_km = float(
+                        location_utils.parse_map_scale_km(current_log)
+                    )
+                    if current_scale_km > 0.04:
+                        logging.info(
+                            f"🔍 [Final Scale] 현재({current_scale_km}km) > 0.05km -> Zoom In"
+                        )
+                        self.zoom_in()
+                    elif current_scale_km < 0.01 and not has_overshot:
+                        # 오버슈팅 차단 상태가 아닐 때만 Zoom Out 허용
+                        logging.info(
+                            f"🚀 [Final Scale] 현재({current_scale_km}km) < 0.05km -> Zoom Out"
+                        )
+                        self.zoom_out()
+                    else:
+                        logging.info(
+                            f"✅ 최종 50m 스케일 세팅 완료! (현재: {current_scale_km}km)"
+                        )
+                        break
+
+                return True
+
+            # --- 3-1. 동일 스케일 연속 오버슈팅/진동 감지 로직 ---
+            if prev_scale is not None and current_scale_km == prev_scale:
+                scale_same_count += 1
+            else:
+                scale_same_count = 1
+                prev_scale = current_scale_km
+
+            # 동일 스케일이 3회 이상 유지되면서 거리가 더 좁혀지지 않고 주변에서 맴돌 때
+            force_zoom_in = False
+            if scale_same_count >= 3 and prev_distance is not None:
+                # [수정] 남은 거리가 1km 이하일 때만 오버슈팅으로 판단하도록 조건 완화
+                if distance_m >= prev_distance * 0.8 and distance_m <= 1000:
+                    logging.warning(
+                        f"⚠️ [{scale_same_count}회 연속 동일 스케일({current_scale_km}km)] "
+                        f"오버슈팅 감지(남은거리: {distance_m:.1f}m) -> 강제 Zoom In 실행 및 Zoom Out 금지 설정"
+                    )
+                    force_zoom_in = True
+                    has_overshot = True  # 오버슈팅 발생 플래그 고정 (이후 스케일 올려서 확대/축소 진동하는 것 막음)
+                    scale_same_count = 0  # 카운터 초기화
+
+            prev_distance = distance_m
+
+            # 강제 Zoom In 발생 시 스케일을 낮추고(확대) 바로 다음 루프로
+            if force_zoom_in:
+                self.zoom_in()
+                continue  # 스케일을 낮췄으므로 바로 다음 루프에서 위치 re-check
+
+            # 4. 남은 거리에 따른 '적정 목표 스케일' 설정
+            #if distance_m >= 150000:       # 150km 이상
+            #    ideal_scale = 100.0
+            if distance_m >= 80000:      # 80km ~ 150km
+                ideal_scale = 50.0
+            elif distance_m >= 30000:      # 30km ~ 80km
+                ideal_scale = 20.0
+            elif distance_m >= 10000:      # 10km ~ 30km
+                ideal_scale = 5.0
+            elif distance_m >= 3000:       # 3km ~ 10km
+                ideal_scale = 2.0
+            elif distance_m >= 1000:       # 1km ~ 3km
+                ideal_scale = 0.5
+            elif distance_m >= 300:        # 300m ~ 1km
+                ideal_scale = 0.2
+            elif distance_m >= 100:        # 100m ~ 300m
+                ideal_scale = 0.1
+            elif distance_m >= 50:         # 50m ~ 100m
+                ideal_scale = 0.05
+            else:                          # 50m 미만
+                ideal_scale = 0.02
+
+            # 5. 스케일 한 번에 쭉 올리기/내리기 (Jump Zoom)
+            if current_scale_km < ideal_scale * 0.3:
+                # 오버슈팅이 한 번이라도 발생했다면 지도 스케일을 키우는(Zoom Out) 동작을 금지함
+                if has_overshot:
+                    logging.info(
+                        f"🛡️ [Overshoot Guard] 현재({current_scale_km}km) < 목표({ideal_scale}km) 이지만 오버슈팅 이력으로 Zoom Out 차단"
+                    )
+                else:
+                    logging.info(
+                        f"🚀 [Scale Jump] 현재({current_scale_km}km) -> 목표({ideal_scale}km) 연속 Zoom Out"
+                    )
+                    temp_scale = current_scale_km
+                    tap_count = 0
+                    while temp_scale < ideal_scale * 0.7 and tap_count < 6:
+                        self.zoom_out()
+                        temp_scale *= 4.0
+                        tap_count += 1
+
+                    time.sleep(0.6)
+                    continue
+
+            elif current_scale_km > ideal_scale * 2.0:
+                logging.info(
+                    f"🔍 [Scale Jump] 현재({current_scale_km}km) -> 목표({ideal_scale}km) 연속 Zoom In"
+                )
+                temp_scale = current_scale_km
+                tap_count = 0
+                while temp_scale > ideal_scale * 1.3 and tap_count < 6:
+                    self.zoom_in()
+                    temp_scale /= 4.0
+                    tap_count += 1
+
+                time.sleep(0.6)
+                continue
+
+            # 6. 스와이프 계산 및 픽셀 무한루프 방지
+            map_scale_m = current_scale_km * 1000.0
+            screen_radius_px = min(screen_width, screen_height) * 0.35
+
+            swipe_dx = -1 * (dx_m / (map_scale_m + 1e-5)) * screen_radius_px
+            swipe_dy = (dy_m / (map_scale_m + 1e-5)) * screen_radius_px
+
+            swipe_len = math.sqrt(swipe_dx**2 + swipe_dy**2)
+
+            if swipe_len < 15.0:
+                logging.info(
+                    f"계산된 스와이프 거리({swipe_len:.1f}px)가 너무 작아 스와이프 생략 후 도달 판정 단계로 넘어갑니다."
+                )
+                distance_m = 0.0
+                continue
+
+            max_swipe_px = min(screen_width, screen_height) * 0.35
+            if swipe_len > max_swipe_px:
+                swipe_dx = (swipe_dx / swipe_len) * max_swipe_px
+                swipe_dy = (swipe_dy / swipe_len) * max_swipe_px
+
+            pos1 = {"x": int(center_x), "y": int(center_y)}
+            pos2 = {"x": int(center_x + swipe_dx), "y": int(center_y + swipe_dy)}
+
+            self.swipe(pos1=pos1, pos2=pos2)
+            time.sleep(0.8)
+
+        logging.warning(
+            f"⚠️ 최대 시도 횟수({max_attempts}회) 초과로 중단합니다."
+        )
+        return False
+
+
+
+#--------------------------------- 키보드 및 입력 기능 함수 --------------------------------
+
+class KeyboardController(TouchController):
     """디바이스 키보드 입력을 제어하는 클래스."""
+
     LANG_MAP = {
         "KR": ["한국어", "korean", "ko"],
         "EN": ["english", "영어", "en"],
@@ -733,539 +978,350 @@ class KeyboardController:
         "ZH": set("ㄅㄆㄇㄈㄉㄊㄋㄌ"),
     }
     SHIFT_CHAR_MAP = {
-        "ㄲ": "ㄱ",
-        "ㄸ": "ㄷ",
-        "ㅃ": "ㅂ",
-        "ㅆ": "ㅅ",
-        "ㅉ": "ㅈ",
-        "ㅒ": "ㅐ",
-        "ㅖ": "ㅔ",
+        "ㄲ": "ㄱ", "ㄸ": "ㄷ", "ㅃ": "ㅂ", "ㅆ": "ㅅ", "ㅉ": "ㅈ",
+        "ㅒ": "ㅐ", "ㅖ": "ㅔ",
     }
     KEYBOARD_IDENTIFIERS = ["com.samsung.android.honeyboard", "inputmethod", "keyboard"]
-    def __init__(
-        self,
-        device_dict: dict,
-    ):
+
+    def __init__(self, device: dict):
         """
         :param device_dict: 'ppadb_device', 'u2_device', 'resolution' 등을 포함하는 딕셔너리
-        :param keyboard_json_path: 키보드 매핑 좌표가 저장될 JSON 경로
         """
-        self.device_dict = device_dict
-        self.ppadb_dev = device_dict.get("ppadb_device")
-        self.u2_dev = device_dict.get("u2_device")
-        self.resolution = device_dict.get("resolution", "")
-        self.serial = getattr(self.ppadb_dev, "serial", "UNKNOWN")
-        self.keyboard_json_path = r'resources/configs/keyboard.json'
+        super().__init__(device)
+        self.resolution = self.device.get("resolution", "")
+        self.keyboard_json_path = os.path.join("resources", "configs", "keyboard.json")
         self.current_keyboard_lang = None
 
-    def input_text(self, text):
-        """
-        ppadb의 device_obj를 사용하여 텍스트를 입력합니다.
-        공백은 안드로이드 input 시스템이 인식하도록 %s로 치환하여 전달합니다.
-        """
-        # 2. 텍스트 안전 처리 (공백 치환)
-        if isinstance(text, (int, float)):
-            safe_text = str(text)
-        else:
-            safe_text = str(text).replace(" ", "%s")
+    # ==========================================
+    # 1. ADB / 기본 입력 동작
+    # ==========================================
 
-        command = f'input text "{safe_text}"'
-        
+    def is_keyboard_present(self):
+        """현재 화면에 소프트 키보드가 노출되어 있는지 검사합니다."""
+        if not self.u2_dev:
+            return False
+
         try:
-            logging.info(f"Input Text: {text} (Encoded: {safe_text})")
-            self.ppadb_dev.shell(command)
-            return 0
+            if self.u2_dev.info.get("isKeyboardShown", False):
+                return True
         except Exception as e:
-            logging.error(f"Input Text Error {e}")
+            logging.debug(f"u2.info 키보드 상태 확인 실패: {e}")
+
+        try:
+            xml_str = self.u2_dev.dump_hierarchy(compressed=False, pretty=True)
+            check_list = self.KEYBOARD_IDENTIFIERS + ["로 변경"]
+            if any(kw in xml_str.lower() for kw in check_list):
+                return True
+        except Exception as e:
+            logging.error(f"키보드 XML 검사 중 오류: {e}")
+
+        return False
+
+    # ==========================================
+    # 2. 키보드 상태 레이아웃 관리 (매핑 & 변경)
+    # ==========================================
+    def set_lang_in_keyboard(self, target_lan, max_attempts: int = 10):
+        """화면 UI를 조작하여 소프트 키보드의 언어를 target_lan으로 변경합니다."""
+        if not self.u2_dev:
             return -1
 
-    def send_keyevent(self, keycode):
-        """
-        ppadb의 device_obj를 사용하여 안드로이드 키 이벤트를 전송합니다.
-        주요 키코드:
-        3  - Home
-        4  - Back
-        66 - Enter
-        67 - Backspace
-        """
-        serial = self.ppadb_dev.serial
-        # 2. 명령어 구성
-        command = f"input keyevent {keycode}"
+        target_lan = target_lan.upper()
+        target_keywords = self.LANG_MAP.get(target_lan, [target_lan.lower()])
+        target_chars = self.LANG_CHAR_MAP.get(target_lan, set())
         
-        try:
-            logging.info(f"[{serial}] Send Keyevent: {keycode}")
-            
-            # 3. ppadb를 통한 실행
-            self.ppadb_dev.shell(command)
-            
-            return 0
-        except Exception as e:
-            logging.error(f"[{serial}] Send Keyevent Error: {e}")
-            return -1
-        
+        all_lang_keywords = [kw for sublist in self.LANG_MAP.values() for kw in sublist]
+        space_identifiers = ["space", "스페이스", "공백", "空格", "espace", "espacio"]
 
-def decompose_text(text):
-    """
-    한글(자모 및 이중모음/쌍자음/겹받침 분리), 영어, 숫자, 특수문자가 섞인 텍스트를 
-    키보드 입력 단위(타자 단위) 리스트로 변환합니다.
-    """
-    # 1. 모음 분해 매핑 (이중모음 해체)
-    complex_vowels = {
-        #'ㅐ': ['ㅏ', 'ㅣ'],
-        #'ㅒ': ['ㅑ', 'ㅣ'],
-        #'ㅔ': ['ㅓ', 'ㅣ'],
-        #'ㅖ': ['ㅕ', 'ㅣ'],
-        'ㅘ': ['ㅗ', 'ㅏ'],
-        'ㅙ': ['ㅗ', 'ㅒ'],
-        'ㅚ': ['ㅗ', 'ㅣ'],
-        'ㅝ': ['ㅜ', 'ㅓ'],
-        'ㅞ': ['ㅜ', 'ㅔ'],
-        'ㅟ': ['ㅜ', 'ㅣ'],
-        'ㅢ': ['ㅡ', 'ㅣ'],
-    }
+        for attempt in range(max_attempts):
+            xml_str = self.u2_dev.dump_hierarchy(compressed=False, pretty=True)
+            root = ET.fromstring(xml_str)
 
-    # 2. 자음 분해 매핑 (초성 쌍자음 & 종성 겹받침 해체)
-    complex_consonants = {
-        # 쌍자음 (초성 / 종성 공통)
-        #'ㄲ': ['ㄱ', 'ㄱ'],
-        #'ㄸ': ['ㄷ', 'ㄷ'],
-        #'ㅃ': ['ㅂ', 'ㅂ'],
-        #'ㅆ': ['ㅅ', 'ㅅ'],
-        #'ㅉ': ['ㅈ', 'ㅈ'],
-        
-        # 겹받침 (종성)
-        'ㄳ': ['ㄱ', 'ㅅ'],
-        'ㄵ': ['ㄴ', 'ㅈ'],
-        'ㄶ': ['ㄴ', 'ㅎ'],
-        'ㄺ': ['ㄹ', 'ㄱ'],
-        'ㄻ': ['ㄹ', 'ㅁ'],
-        'ㄼ': ['ㄹ', 'ㅂ'],
-        'ㄽ': ['ㄹ', 'ㅅ'],
-        'ㄾ': ['ㄹ', 'ㅌ'],
-        'ㄿ': ['ㄹ', 'ㅍ'],
-        'ㅀ': ['ㄹ', 'ㅎ'],
-        'ㅄ': ['ㅂ', 'ㅅ'],
-    }
+            space_node = None
+            change_btn_node = None
+            all_keyboard_texts = []
 
-    # 한글 자모 인덱스 테이블
-    chosung = ['ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ']
-    jungsung = ['ㅏ', 'ㅐ', 'ㅑ', 'ㅒ', 'ㅓ', 'ㅔ', 'ㅕ', 'ㅖ', 'ㅗ', 'ㅘ', 'ㅙ', 'ㅚ', 'ㅛ', 'ㅜ', 'ㅝ', 'ㅞ', 'ㅟ', 'ㅠ', 'ㅡ', 'ㅢ', 'ㅣ']
-    jongsung = ['', 'ㄱ', 'ㄲ', 'ㄳ', 'ㄴ', 'ㄵ', 'ㄶ', 'ㄷ', 'ㄹ', 'ㄺ', 'ㄻ', 'ㄼ', 'ㄽ', 'ㄾ', 'ㄿ', 'ㅀ', 'ㅁ', 'ㅂ', 'ㅄ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ']
+            for node in root.iter("node"):
+                res_id = node.attrib.get("resource-id", "").lower()
+                desc = node.attrib.get("content-desc", "").lower()
+                text = node.attrib.get("text", "").lower()
 
-    result = []
-    
-    for char in text:
-        code = ord(char)
-        # 완성형 한글 범위(가 ~ 힣)
-        if 0xAC00 <= code <= 0xD7A3:
-            char_code = code - 0xAC00
-            cho_idx = char_code // 588
-            jung_idx = (char_code % 588) // 28
-            jong_idx = char_code % 28
+                if text:
+                    all_keyboard_texts.append(text)
 
-            # 1. 초성 (쌍자음 해체 적용)
-            cho = chosung[cho_idx]
-            result.extend(complex_consonants.get(cho, [cho]))
+                if "로 변경" in desc or "로 변경" in text:
+                    change_btn_node = node
+                    continue
 
-            # 2. 중성 (이중모음 해체 적용)
-            jung = jungsung[jung_idx]
-            result.extend(complex_vowels.get(jung, [jung]))
+                is_space = (
+                    any(kw in res_id or kw in desc or kw in text for kw in space_identifiers) or
+                    (text and any(lang_kw in text for lang_kw in all_lang_keywords))
+                )
+                if is_space:
+                    space_node = node
 
-            # 3. 종성 (겹받침/쌍자음 해체 적용)
-            if jong_idx > 0:
-                jong = jongsung[jong_idx]
-                result.extend(complex_consonants.get(jong, [jong]))
-        else:
-            # 영문, 숫자, 특수문자 또는 단독 자모 처리
-            if char in complex_vowels:
-                result.extend(complex_vowels[char])
-            elif char in complex_consonants:
-                result.extend(complex_consonants[char])
+            if space_node is not None or change_btn_node is not None:
+                sp_desc = space_node.attrib.get("content-desc", "").lower() if space_node else ""
+                sp_text = space_node.attrib.get("text", "").lower() if space_node else ""
+                sp_info = f"{sp_desc} {sp_text}".strip()
+
+                logging.info(f"[Check {attempt+1}/{max_attempts}] 스페이스바 정보: '{sp_info}'")
+
+                # [조건 1] 명시적 언어 텍스트 존재 확인
+                if any(lang_kw in sp_info for lang_kw in all_lang_keywords):
+                    if any(kw in sp_info for kw in target_keywords):
+                        logging.info(f"[Success] 명시적 텍스트로 목표 언어('{target_lan}') 확인.")
+                        return 0
+                # [조건 2] 키 자판 문자로 추정
+                else:
+                    found_chars = [t for t in all_keyboard_texts if t in target_chars]
+                    if len(found_chars) >= 3:
+                        logging.info(f"[Success] 자판 문자 감지({found_chars[:5]})로 목표 언어('{target_lan}') 확인.")
+                        return 0
+
+                # 언어 전환 버튼 클릭
+                click_node = change_btn_node if change_btn_node is not None else space_node
+                bounds_str = click_node.attrib.get("bounds", "")
+                nums = list(map(int, re.findall(r"\d+", bounds_str)))
+
+                if len(nums) == 4:
+                    x1, y1, x2, y2 = nums
+                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+
+                    if change_btn_node is None:
+                        target_x = x1 - 80
+                        self.u2_dev.click(target_x, cy)
+                        logging.info(f"[Click] 스페이스바 좌측 클릭: ({target_x}, {cy})")
+                    else:
+                        self.u2_dev.click(cx, cy)
+                        logging.info(f"[Click] 언어 변경 버튼 클릭: ({cx}, {cy})")
+
+                    time.sleep(0.1)
             else:
-                result.append(char)
+                logging.info("[Fail] 스페이스바 또는 언어 변경 노드를 찾지 못함.")
+                return -1
 
-    return result
-
-def check_language(char):
-    try:
-        name = unicodedata.name(char)
-        if "HANGUL" in name:
-            return "KR"
-        elif "LATIN" in name:
-            return "EN"
-    except ValueError:
-        return "etc" # 숫자나 특수문자 등
-    return "etc"
-
-def set_lang_in_keyboard(device, target_lan, max_attempts : int = 10):
-    LANG_MAP = {
-        'KR': ['한국어', 'korean', 'ko'],
-        'EN': ['english', '영어', 'en'],
-        'JP': ['日本語', 'japanese', '일본어', 'ja'],
-        'ZH': ['中文', 'chinese', '중국어', 'zh']
-    }
-    
-    # [조건 2용] 스페이스바 텍스트가 없을 때 사용할 언어별 대표 자판 문자열
-    LANG_CHAR_MAP = {
-        'KR': set('ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎㅏㅑㅓㅕㅗㅛㅜㅠㅡㅣㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔ'),
-        'EN': set('abcdefghijklmnopqrstuvwxyz'),
-        'JP': set('あかさたなはまやらわアカサタナハマヤラワ'),
-        'ZH': set('ㄅㄆㄇㄈㄉㄊㄋㄌ') # 병음 자판 시 알파벳 사용 가능
-    }
-
-    u2 = device.get('u2_device')
-    if not u2:
+        logging.error(f"[Fail] {max_attempts}회 시도 후에도 '{target_lan}' 설정 실패.")
         return -1
 
-    target_lan = target_lan.upper()
-    target_keywords = LANG_MAP.get(target_lan, [target_lan.lower()])
-    target_chars = LANG_CHAR_MAP.get(target_lan, set())
-    
-    all_lang_keywords = [kw for sublist in LANG_MAP.values() for kw in sublist]
-    space_identifiers = ['space', '스페이스', '공백', '空格', 'espace', 'espacio']
+    def update_keyboard_key(self, lan_type):
+        """현재 키보드의 키 좌표를 추출하여 keyboard.json에 저장합니다."""
+        if not self.u2_dev:
+            logging.error("u2_device 객체를 찾을 수 없습니다.")
+            return -1
 
-    for attempt in range(max_attempts):
-        xml_str = u2.dump_hierarchy(compressed=False, pretty=True)
-        root = ET.fromstring(xml_str)
+        try:
+            xml_str = self.u2_dev.dump_hierarchy(compressed=False, pretty=True)
+            root = ET.fromstring(xml_str)
 
-        space_node = None
-        change_btn_node = None
-        all_keyboard_texts = [] # 키보드 자판의 모든 문자를 모아둘 리스트
+            json_data = {}
+            if os.path.exists(self.keyboard_json_path):
+                with open(self.keyboard_json_path, "r", encoding="utf-8") as f:
+                    try:
+                        json_data = json.load(f)
+                    except json.JSONDecodeError:
+                        json_data = {}
 
-        for node in root.iter('node'):
-            res_id = node.attrib.get('resource-id', '').lower()
-            desc = node.attrib.get('content-desc', '').lower()
-            text = node.attrib.get('text', '').lower()
+            if lan_type not in json_data:
+                json_data[lan_type] = {}
 
-            if text:
-                all_keyboard_texts.append(text)
+            extracted_count = 0
+            for node in root.iter("node"):
+                pkg = node.attrib.get("package", "").lower()
+                res_id = node.attrib.get("resource-id", "").lower()
+                cls = node.attrib.get("class", "").lower()
 
-            # 1. "로 변경" 전용 버튼 감지
-            if "로 변경" in desc or "로 변경" in text:
-                change_btn_node = node
-                continue
+                if not any(ident in pkg or ident in res_id or ident in cls for ident in self.KEYBOARD_IDENTIFIERS):
+                    continue
 
-            # 2. 스페이스바 감지
-            is_space = False
-            if any(kw in res_id or kw in desc or kw in text for kw in space_identifiers):
-                is_space = True
-            elif text and any(lang_kw in text for lang_kw in all_lang_keywords):
-                is_space = True
+                text = node.attrib.get("text", "").strip()
+                desc = node.attrib.get("content-desc", "").strip()
+                bounds_str = node.attrib.get("bounds")
+                key_label = text if text else desc
 
-            if is_space:
-                space_node = node
+                if not key_label or not bounds_str:
+                    continue
 
-        # 3. 언어 상태 판별
-        if space_node is not None or change_btn_node is not None:
-            sp_desc = space_node.attrib.get('content-desc', '').lower() if space_node is not None else ''
-            sp_text = space_node.attrib.get('text', '').lower() if space_node is not None else ''
-            sp_info = f"{sp_desc} {sp_text}".strip()
+                nums = list(map(int, re.findall(r"\d+", bounds_str)))
+                if len(nums) == 4:
+                    cx, cy = (nums[0] + nums[2]) // 2, (nums[1] + nums[3]) // 2
+                    
+                    if key_label not in json_data[lan_type]:
+                        json_data[lan_type][key_label] = {}
 
-            logging.info(f"[Check {attempt+1}/{max_attempts}] 스페이스바 감지 정보: '{sp_info}'")
+                    json_data[lan_type][key_label][self.resolution] = {"x": cx, "y": cy}
+                    extracted_count += 1
 
-            # ------------------------------------------------------------------
-            # [조건 1] 스페이스바/버튼에 '한국어', 'English' 등 명시적 언어가 적힌 경우
-            # ------------------------------------------------------------------
-            has_explicit_lang = any(lang_kw in sp_info for lang_kw in all_lang_keywords)
+            if extracted_count == 0:
+                logging.warning(f"키 노드를 정합하지 못했습니다. (lan_type: {lan_type})")
+                return -1
 
-            if has_explicit_lang:
-                if any(kw in sp_info for kw in target_keywords):
-                    logging.info(f"[Success] (조건1) 명시적 텍스트로 목표 언어('{target_lan}') 확인 완료.")
-                    return 0
-                else:
-                    logging.info(f"[Info] 현재 스페이스바 텍스트('{sp_info}')가 목표 언어('{target_lan}')와 다름.")
+            os.makedirs(os.path.dirname(self.keyboard_json_path), exist_ok=True)
+            with open(self.keyboard_json_path, "w", encoding="utf-8") as f:
+                json.dump(json_data, f, ensure_ascii=False, indent=4)
 
-            # ------------------------------------------------------------------
-            # [조건 2] 스페이스바에 언어 표시가 없는 경우 (한/영 2개 언어 모드 등)
-            # ------------------------------------------------------------------
+            logging.info(f"[SUCCESS] {extracted_count}개 키 좌표 업데이트 완료 ({lan_type} / {self.resolution})")
+            return 0
+
+        except Exception as e:
+            logging.error(f"update_keyboard_key 오류: {e}")
+            return -1
+
+    def press_key_by_char(self, char, lan_type="KR"):
+        """json 파일의 좌표 정보를 기반으로 키 터치를 수행합니다."""
+        if not self.u2_dev:
+            logging.error("u2_device 객체를 찾을 수 없습니다.")
+            return -1
+
+        if not os.path.exists(self.keyboard_json_path):
+            logging.error(f"'{self.keyboard_json_path}' 설정 파일이 존재하지 않습니다.")
+            return -1
+
+        try:
+            with open(self.keyboard_json_path, "r", encoding="utf-8") as f:
+                keyboard_data = json.load(f)
+
+            lan_data = keyboard_data.get(lan_type, {})
+            is_double_consonant = (lan_type == "KR" and char in self.SHIFT_CHAR_MAP)
+            target_char = self.SHIFT_CHAR_MAP[char] if is_double_consonant else char
+
+            # Shift 키 좌표 탐색
+            shift_pos = None
+            if is_double_consonant:
+                for key_label, pos_map in lan_data.items():
+                    if "시프트" in key_label.lower() or "shift" in key_label.lower():
+                        shift_pos = pos_map.get(self.resolution)
+                        break
+
+            char_pos = lan_data.get(target_char, {}).get(self.resolution)
+
+            if not char_pos or (char_pos.get("x") == 0 and char_pos.get("y") == 0):
+                logging.warning(f"[{target_char}] 키 좌표 누락 (언어: {lan_type}, 해상도: {self.resolution})")
+                return -1
+
+            if is_double_consonant and not shift_pos:
+                logging.warning(f"Shift 키 좌표를 찾을 수 없어 '{char}' 입력 불가능")
+                return -1
+
+            # 키 클릭 터치 액션 (one_finger_touch 전역함수 또는 외부 바인딩 활용)
+            if is_double_consonant:
+                logging.info(f"'{char}' 조합 입력을 위해 Shift 적용")
+                self.one_finger_touch(shift_pos)
+                self.one_finger_touch(char_pos)
+                self.one_finger_touch(shift_pos)
             else:
-                logging.info(f"[Info] 스페이스바에 언어 텍스트가 없음 -> 자판 키 문자(ㄱ, A 등)로 언어 추정 중...")
-                # 화면 노드들의 text 중 목표 언어 대표 문자가 존재하는지 체크
-                found_chars = [t for t in all_keyboard_texts if t in target_chars]
-                
-                if len(found_chars) >= 3: # 실수 방지를 위해 키가 3개 이상 들어맞을 때 성공 처리
-                    logging.info(f"[Success] (조건2) 자판 문자 감지({found_chars[:5]})로 목표 언어('{target_lan}') 확인 완료.")
-                    return 0
+                self.one_finger_touch(char_pos)
 
-            # ------------------------------------------------------------------
-            # 언어가 일치하지 않으므로 변경 버튼 클릭 진행
-            # ------------------------------------------------------------------
-            click_node = change_btn_node if change_btn_node is not None else space_node
-            bounds_str = click_node.attrib.get('bounds', '')
+            logging.info(f"[SUCCESS] '{char}' 입력 완료 -> 좌표: ({char_pos['x']}, {char_pos['y']})")
+            return 0
 
-            nums = list(map(int, re.findall(r'\d+', bounds_str)))
-            if len(nums) == 4:
-                x1, y1, x2, y2 = nums
-                cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-
-                if change_btn_node is None:
-                    # 지구본 아이콘 / 언어 변경 키 위치인 스페이스바 좌측 클릭
-                    target_x = x1 - 80 
-                    u2.click(target_x, cy)
-                    logging.info(f"[Click] 스페이스바 좌측 언어 변경 위치 클릭: ({target_x}, {cy})")
-                else:
-                    u2.click(cx, cy)
-                    logging.info(f"[Click] 언어 변경 버튼 클릭: ({cx}, {cy})")
-                
-                time.sleep(0.1) # 키보드 레이아웃 전환 대기
-        else:
-            logging.info("[Fail] 스페이스바 또는 언어 변경 노드를 찾지 못함.")
+        except Exception as e:
+            logging.error(f"press_key_by_char 실행 오류: {e}")
             return -1
 
-    print(f"[Fail] {max_attempts}회 시도 후에도 '{target_lan}' 설정 실패.")
-    return -1
-
-def update_keyboard_key(device, lan_type):
-    keyboard_json_path = "resources/configs/keyboard.json"
-    
-    # 키보드 패키지/클래스/아이디 식별 키워드 리스트
-    keyboard_identifiers = [
-        'com.samsung.android.honeyboard', # 삼성 키보드 메인 패키지
-        'inputmethod',
-        'keyboard'
-    ]
-
-    res_key = device['resolution']
-    u2 = device.get('u2_device')
-    if not u2:
-        print("[ERROR] u2_device 객체를 찾을 수 없습니다.")
-        return -1
-    
-    try:
-        # 1. 키보드 영역 XML 덤프
-        xml_str = u2.dump_hierarchy(compressed=False, pretty=True)
-        root = ET.fromstring(xml_str)
-
-        # 2. 기존 resources/configs/keyboard.json 읽어오기
-        json_data = {}
-        if os.path.exists(keyboard_json_path):
-            with open(keyboard_json_path, "r", encoding="utf-8") as f:
-                try:
-                    json_data = json.load(f)
-                except json.JSONDecodeError:
-                    json_data = {}
-
-        if lan_type not in json_data:
-            json_data[lan_type] = {}
-
-        # 3. XML 내 노드 탐색 및 키보드 영역 필터링
-        extracted_count = 0
-        for node in root.iter('node'):
-            # 노드의 주요 식별 정보 추출 (패키지, 리소스ID, 클래스 등)
-            pkg = node.attrib.get('package', '').lower()
-            res_id = node.attrib.get('resource-id', '').lower()
-            cls = node.attrib.get('class', '').lower()
-
-            # -------------------------------------------------------------
-            # 필터링: package, resource-id, class 중 하나라도 키보드 식별자를 포함하는지 확인
-            # -------------------------------------------------------------
-            is_keyboard_node = any(
-                identifier in pkg or identifier in res_id or identifier in cls
-                for identifier in keyboard_identifiers
-            )
-            
-            if not is_keyboard_node:
-                continue
-            # -------------------------------------------------------------
-
-            text = node.attrib.get('text', '').strip()
-            desc = node.attrib.get('content-desc', '').strip()
-            bounds_str = node.attrib.get('bounds')
-
-            # 식별할 키 값 (text 우선, 없으면 content-desc 사용)
-            key_label = text if text else desc
-
-            # 키 식별 라벨이 없거나 bounds가 없으면 패스
-            if not key_label or not bounds_str:
-                continue
-
-            # bounds 파싱: "[x1,y1][x2,y2]" -> [x1, y1, x2, y2]
-            nums = list(map(int, re.findall(r'\d+', bounds_str)))
-            if len(nums) == 4:
-                x1, y1, x2, y2 = nums
-                cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-
-                # JSON 데이터 구조 생성 및 좌표 할당
-                if key_label not in json_data[lan_type]:
-                    json_data[lan_type][key_label] = {}
-
-                json_data[lan_type][key_label][res_key] = {
-                    "x": cx,
-                    "y": cy
-                }
-                extracted_count += 1
-
-        if extracted_count == 0:
-            logging.info(f"[WARN] XML에서 필터 조건에 맞는 키 노드가 없습니다. (lan_type: {lan_type})")
+    # ==========================================
+    # 3. 고수준 입력 파이프라인
+    # ==========================================
+    def search_fts(self, text):
+        """텍스트를 분해하고 언어를 맞추어 입력을 진행하는 메인 메소드입니다."""
+        if not self.u2_dev:
+            logging.error("u2_device를 찾을 수 없습니다.")
             return -1
 
-        # 4. JSON 파일 저장
-        os.makedirs(os.path.dirname(keyboard_json_path), exist_ok=True)
-        with open(keyboard_json_path, "w", encoding="utf-8") as f:
-            json.dump(json_data, f, ensure_ascii=False, indent=4)
+        if not self.is_keyboard_present():
+            logging.warning("화면에 키보드가 활성화되어 있지 않습니다.")
+            return -1
 
-        logging.info(f"[SUCCESS] {extracted_count}개 키 좌표가 '{keyboard_json_path}' ({lan_type} / {res_key})에 성공적으로 업데이트되었습니다.")
+        char_list = self.decompose_text(text)
+
+        for char in char_list:
+            lan_type = self.check_language(char)
+            logging.info(f"입력 대상: '{char}' | 감지된 언어: {lan_type}")
+
+            if lan_type == "KR":
+                if self.current_keyboard_lang != lan_type:
+                    self.set_lang_in_keyboard(lan_type)
+                    self.update_keyboard_key(lan_type)
+                    self.current_keyboard_lang = lan_type
+                
+                self.press_key_by_char(char, lan_type)
+            elif lan_type == "EN":
+                self.input_text(char)
+            else:  # 특수문자, 숫자 등
+                self.input_text(char)
+
+        logging.info(f"입력 완료 - {text}")
         return 0
 
-    except Exception as e:
-        logging.info(f"[ERROR] update_keyboard_key 실행 중 오류 발생: {e}")
-        return -1
+    # ==========================================
+    # 4. 정적 유틸리티 함수 (@staticmethod)
+    # ==========================================
+    @staticmethod
+    def decompose_text(text):
+        """한글 자모/이중모음/겹받침 분해 및 문자 단위 분리 함수."""
+        complex_vowels = {
+            'ㅘ': ['ㅗ', 'ㅏ'], 'ㅙ': ['ㅗ', 'ㅒ'], 'ㅚ': ['ㅗ', 'ㅣ'],
+            'ㅝ': ['ㅜ', 'ㅓ'], 'ㅞ': ['ㅜ', 'ㅔ'], 'ㅟ': ['ㅜ', 'ㅣ'], 'ㅢ': ['ㅡ', 'ㅣ'],
+        }
+        complex_consonants = {
+            'ㄳ': ['ㄱ', 'ㅅ'], 'ㄵ': ['ㄴ', 'ㅈ'], 'ㄶ': ['ㄴ', 'ㅎ'],
+            'ㄺ': ['ㄹ', 'ㄱ'], 'ㄻ': ['ㄹ', 'ㅁ'], 'ㄼ': ['ㄹ', 'ㅂ'],
+            'ㄽ': ['ㄹ', 'ㅅ'], 'ㄾ': ['ㄹ', 'ㅌ'], 'ㄿ': ['ㄹ', 'ㅍ'],
+            'ㅀ': ['ㄹ', 'ㅎ'], 'ㅄ': ['ㅂ', 'ㅅ'],
+        }
 
-def is_keyboard_present(u2):
-    """
-    현재 화면에 소프트 키보드가 올라와 있는지 확인합니다.
-    """
-    # 1. uiautomator2 info 속성에서 키보드 노출 여부 확인
-    try:
-        info = u2.info
-        if info.get('isKeyboardShown', False):
-            return True
-    except Exception as e:
-        logging.debug(f"u2.info 키보드 상태 확인 실패: {e}")
+        chosung = ['ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ']
+        jungsung = ['ㅏ', 'ㅐ', 'ㅑ', 'ㅒ', 'ㅓ', 'ㅔ', 'ㅕ', 'ㅖ', 'ㅗ', 'ㅘ', 'ㅙ', 'ㅚ', 'ㅛ', 'ㅜ', 'ㅝ', 'ㅞ', 'ㅟ', 'ㅠ', 'ㅡ', 'ㅢ', 'ㅣ']
+        jongsung = ['', 'ㄱ', 'ㄲ', 'ㄳ', 'ㄴ', 'ㄵ', 'ㄶ', 'ㄷ', 'ㄹ', 'ㄺ', 'ㄻ', 'ㄼ', 'ㄽ', 'ㄾ', 'ㄿ', 'ㅀ', 'ㅁ', 'ㅂ', 'ㅄ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ']
 
-    # 2. XML Hierarchy 덤프에서 삼성 키보드 패키지/입력창 존재 여부 검사 (Fallback)
-    try:
-        xml_str = u2.dump_hierarchy(compressed=False, pretty=True)
-        keyboard_identifiers = [
-            'com.samsung.android.honeyboard', # 삼성 키보드 메인 패키지
-            'inputmethod',
-            'keyboard',
-            '로 변경' # 키보드 특유의 언어 변경 안내 문구
-        ]
-        if any(kw in xml_str.lower() for kw in keyboard_identifiers):
-            return True
-    except Exception as e:
-        logging.error(f"키보드 XML 검사 중 오류: {e}")
+        result = []
+        for char in text:
+            code = ord(char)
+            if 0xAC00 <= code <= 0xD7A3:
+                char_code = code - 0xAC00
+                cho_idx = char_code // 588
+                jung_idx = (char_code % 588) // 28
+                jong_idx = char_code % 28
 
-    return False
+                cho = chosung[cho_idx]
+                result.extend(complex_consonants.get(cho, [cho]))
 
-def press_key_by_char(device, char, lan_type="KR"):
-    keyboard_json_path = "resources/configs/keyboard.json"
-    """
-    resources/configs/keyboard.json에서 해상도 및 char에 해당하는 좌표를 찾아 터치합니다.
-    쌍자음/이중모음인 경우 Shift 키를 활용하여 입력합니다.
-    
-    :param device: 디바이스 객체 (u2_device 포함)
-    :param char: 입력할 문자 (예: "ㄲ", "ㄱ", "Space", "Done" 등)
-    :param lan_type: 언어 타입 (기본값 "KR")
-    :return: 0 (성공) / -1 (실패)
-    """
-    u2 = device.get('u2_device')
-    if not u2:
-        logging.info("[ERROR] u2_device 객체를 찾을 수 없습니다.")
-        return -1
+                jung = jungsung[jung_idx]
+                result.extend(complex_vowels.get(jung, [jung]))
 
-    # 1. JSON 파일 존재 여부 확인
-    if not os.path.exists(keyboard_json_path):
-        logging.info(f"[ERROR] '{keyboard_json_path}' 파일이 존재하지 않습니다. 먼저 update_keyboard_key를 실행해 주세요.")
-        return -1
-
-    # Shift 키가 필요한 문자 매핑 (쌍자음 & 일부 이중모음)
-    shift_char_map = {
-        'ㄲ': 'ㄱ',
-        'ㄸ': 'ㄷ',
-        'ㅃ': 'ㅂ',
-        'ㅆ': 'ㅅ',
-        'ㅉ': 'ㅈ',
-        'ㅒ': 'ㅐ',
-        'ㅖ': 'ㅔ'
-    }
-
-    try:
-        # 2. 현재 디바이스 해상도 가져오기
-        res_key = device.get('resolution', '1752x2800')
-
-        # 3. JSON 파일 읽기
-        with open(keyboard_json_path, "r", encoding="utf-8") as f:
-            keyboard_data = json.load(f)
-
-        lan_data = keyboard_data.get(lan_type, {})
-
-        # 4. Shift 조작이 필요한 문자인지 확인
-        is_double_consonant = (lan_type == "KR" and char in shift_char_map)
-        target_char = shift_char_map[char] if is_double_consonant else char
-
-        # 5. Shift 키 좌표 및 대상 키 좌표 가져오기
-        # -------------------------------------------------------------
-        # 변경된 부분: "시프트" 또는 "shift" 단어가 포함된 키를 가변 검색
-        # -------------------------------------------------------------
-        shift_pos = None
-        if is_double_consonant:
-            for key_label, pos_map in lan_data.items():
-                # 키 라벨에 '시프트' 또는 'shift'가 들어가는지 확인 (대소문자 무시)
-                if '시프트' in key_label.lower() or 'shift' in key_label.lower():
-                    shift_pos = pos_map.get(res_key)
-                    print(f"[INFO] Shift 키 감지됨: '{key_label}'")
-                    break
-        # -------------------------------------------------------------
-        key_data = lan_data.get(target_char, {})
-        char_pos = key_data.get(res_key)
-
-        # 6. 좌표 유효성 검사
-        if not char_pos or (char_pos.get("x", 0) == 0 and char_pos.get("y", 0) == 0):
-            logging.warning(f"[WARN] '{target_char}' 키의 좌표를 찾을 수 없거나 0,0 입니다. (언어: {lan_type}, 해상도: {res_key})")
-            return -1
-
-        if is_double_consonant and (not shift_pos or (shift_pos.get("x", 0) == 0 and shift_pos.get("y", 0) == 0)):
-            logging.warning(f"[WARN] Shift 키의 좌표를 찾을 수 없어 '{char}'를 입력할 수 없습니다.")
-            return -1
-
-        # 7. 터치 실행 (Shift -> 키 입력 -> Shift 해제)
-        if is_double_consonant:
-            logging.info(f"[INFO] '{char}' 입력을 위해 Shift 동작을 조합합니다.")
-            one_finger_touch(device, shift_pos)  # Shift ON
-            one_finger_touch(device, char_pos)   # 대상 키 눌림 (예: ㄱ -> ㄲ 입력됨)
-            one_finger_touch(device, shift_pos)  # Shift OFF (복구)
-        else:
-            one_finger_touch(device, char_pos)
-
-        logging.info(f"[SUCCESS] '{char}' 입력 완료 -> 좌표: ({char_pos['x']}, {char_pos['y']})")
-        return 0
-
-    except Exception as e:
-        logging.info(f"[ERROR] press_key_by_char 실행 중 오류 발생: {e}")
-        return -1
-
-def search_fts(device, text):
-    """
-    텍스트를 자모로 분리한 후 언어 상태를 맞추어 키보드 터치 또는 input_text로 입력합니다.
-    """
-    u2 = device.get('u2_device')
-    if not u2:
-        logging.error("u2_device를 찾을 수 없습니다.")
-        return -1
-    info = u2.info
-    logging.info(info)
-
-    # ----------------------------------------------------
-    # 키보드가 화면에 올라와 있는지 체크
-    # ----------------------------------------------------
-    if not is_keyboard_present(u2):
-        print("[Fail] 화면에 키보드가 활성화되어 있지 않습니다.")
-        logging.warning("키보드가 활성화되어 있지 않아 입력을 중단합니다.")
-        return -1
-
-    # 1. 텍스트 자모 분리
-    char_list = decompose_text(text)
-    current_keyboard_lang = None  # 이전 키보드 언어 상태 추적
-    for char in char_list:
-        lan_type = check_language(char)
-        logging.info(f"입력 대상: '{char}' | 감지된 언어: {lan_type}")
-
-        # 2. 언어 변경이 필요한 경우만 set_lang_in_keyboard 실행 (이전 언어와 같으면 스킵)
-        if lan_type in ["KR"]:
-            if current_keyboard_lang != lan_type:
-                set_lang_in_keyboard(device, lan_type)
-                update_keyboard_key(device, lan_type)
-                current_keyboard_lang = lan_type
+                if jong_idx > 0:
+                    jong = jongsung[jong_idx]
+                    result.extend(complex_consonants.get(jong, [jong]))
             else:
-                logging.info(f"[Skip] 이전 언어({current_keyboard_lang})와 동일하여 키보드 언어 변경을 스킵합니다.")
-        # 3. 언어별 문자의 입력 수행
-        if lan_type == "KR":
-            press_key_by_char(device,char, lan_type)
-        elif lan_type == "EN":
-            input_text(device, char)
-        else:  # 특수문자, 공백 등 'etc' (이전 언어 상태 유지)
-            input_text(device, char)
-    print(f"입력 완료 - {text}")
-    return 0
+                if char in complex_vowels:
+                    result.extend(complex_vowels[char])
+                elif char in complex_consonants:
+                    result.extend(complex_consonants[char])
+                else:
+                    result.append(char)
+
+        return result
+
+    @staticmethod
+    def check_language(char):
+        """단일 문자의 언어 타입(KR, EN, etc)을 구별합니다."""
+        try:
+            name = unicodedata.name(char)
+            if "HANGUL" in name:
+                return "KR"
+            elif "LATIN" in name:
+                return "EN"
+            else:
+                return "etc"
+        except ValueError:
+            return "etc"
+
+
+
+
+
+
+
+
+
+
+
