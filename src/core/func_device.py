@@ -815,7 +815,7 @@ class NaviController(TouchController):
             # 3. 목표 도달 확인 및 50m(0.05km) 최종 스케일 보정
             if distance_m <= THRESHOLD_METERS:
                 logging.info(
-                    f"🎯 목표 위치 도달! (오차: {distance_m:.1f}m <= {THRESHOLD_METERS}m) -> 50m(0.05km) final scale 보정"
+                    f"🎯 목표 위치 도달! (오차: {distance_m:.1f}m <= {THRESHOLD_METERS}m) | 스케일: {current_scale_km}km -> 50m(0.05km) final scale 보정"
                 )
 
                 for _ in range(6):

@@ -194,8 +194,6 @@ def find_setting_icon_by_UI(device):
 
     return None
 
-
-
 def find_eng_back_button_by_UI(device):
     """
     '개발 설정' 또는 'Engineering' 타이틀 주변의 클릭 가능한 뒤로가기 버튼의 중심 좌표를 반환합니다.
