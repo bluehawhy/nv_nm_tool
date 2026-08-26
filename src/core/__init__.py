@@ -8,8 +8,6 @@ Core Module
 from .func_device import *
 from .call_device import *
 from .func_ios import *
-#from .func_image import * 분리
-from .func_ui_class import *
 from .func_record_image import *
 from .func_image_search import *
 from .func_logging import *

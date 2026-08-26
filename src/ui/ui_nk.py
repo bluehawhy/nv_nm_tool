@@ -129,7 +129,6 @@ class AndroidWidget(QWidget):
         
         h_box_2 = QHBoxLayout()
         self.main_window.lock_buttons.append(self.main_window.add_btn(h_box_2, "SPEED", self.main_window.cmd_demo_speed))
-        self.main_window.lock_buttons.append(self.main_window.add_btn(h_box_2, "GUID OFF", self.main_window.set_guidance_off))
         layout.addLayout(h_box_2)
         layout.addSpacing(5)
 
@@ -221,7 +220,6 @@ class TwdAdbWidget(QWidget):
         
         h_box_2 = QHBoxLayout()
         self.main_window.lock_buttons.append(self.main_window.add_btn(h_box_2, "SPEED", self.main_window.cmd_demo_speed))
-        self.main_window.lock_buttons.append(self.main_window.add_btn(h_box_2, "GUID OFF", self.main_window.set_guidance_off))
         layout.addLayout(h_box_2)
         layout.addSpacing(5)
 
@@ -251,7 +249,9 @@ class MainWindow(QMainWindow):
         self.revision = revision
         self.devices = []           # 검색된 기기 리스트 바구니
         self.device = None          # 현재 활성화(연결)된 단일 기기 딕셔너리
-        self.and_log_manager = None # [수정] AndroidLogManager 객체 초기화
+        self.nav_ctrl_manager = None #NaviController 초기선언
+        self.and_log_manager = None #AndroidLogManager 초기선언
+        self.keyboard_manager = None #KeyboardController 초기선언
         self.device_type = None
         self.current_config = None
         self.is_scanning = False    # 기기 스캔 중 복수 실행 방지 플래그
@@ -582,6 +582,11 @@ class MainWindow(QMainWindow):
         # 4. 장치 정보 및 내부 변수 초기화 (중요)
         self.device = None
         self.and_log_manager = None  # [수정] None으로 초기화
+        self.nav_ctrl_manager = None # [수정] None으로 초기화
+        self.keyboard_manager = None # [수정] None으로 초기화
+        self.aa_manager.stop() # 먼저 스레드 종료 후
+        self.aa_manager = None #None으로 초기화
+        
         self.version_found_flag = False
         self.sw_version = "Checking..."
         self.map_version = "Checking..."
@@ -608,8 +613,23 @@ class MainWindow(QMainWindow):
         self.device = self.devices[current_index]
         dev_type_str = self.device.get('detected_type', 'Device')
 
+        # [수정] NaviController 객체 선언
+        self.nav_ctrl_manager = func_device.NaviController(device=self.device)
+        self.keyboard_manager = func_device.KeyboardController(device=self.device)
+
         # [수정] AndroidLogManager 객체 선언
         self.and_log_manager = func_logging.AndroidLogManager(device=self.device)
+
+        # AndroidRecordManager 객체 선언 및 검색 스레드 실행
+        self.aa_manager = func_record_image.AndroidRecordManager(device=self.device,log_manager=self.and_log_manager)
+        self.aa_manager.start()
+
+        # LogManager에게 같은 인스턴스 전달
+        self.and_log_manager.set_record_manager(
+            self.aa_manager
+        )
+
+        
 
         #기존 UI 요소 비활성화 및 상태 업데이트
         self.combo_device.setEnabled(False)
@@ -925,31 +945,30 @@ class MainWindow(QMainWindow):
                 button.setEnabled(True)
 
     # 각 버튼 액션들
-    def cmd_gotoeng(self): self.run_task(func_device.go_to_eng_mode, self.device)
-    def cmd_activate_eng(self): self.run_task(func_device.activate_eng, self.device)
+    def cmd_gotoeng(self): self.run_task(self.nav_ctrl_manager.go_to_eng_mode, )
+    def cmd_activate_eng(self): self.run_task(self.nav_ctrl_manager.activate_eng,)
     def cmd_react_adb(self): self.run_task(call_device.react_adb)
-    def cmd_rec_video(self): self.run_task(func_record_image.record_video, self.device,self.and_log_manager)
-    def cmd_tk_screenshot(self): self.run_task(func_record_image.record_screenshot, self.device, self.and_log_manager)
-    def cmd_demo_on(self): self.run_task(func_device.set_demo_mode, self.device, "START")
-    def cmd_demo_stop(self): self.run_task(func_device.set_demo_mode, self.device, "STOP")
-    def cmd_demo_pause(self): self.run_task(func_device.set_demo_mode, self.device, "PAUSE")
-    def cmd_demo_repeat(self): self.run_task(func_device.set_demo_mode, self.device, "REPEAT")
-    def cmd_set_car_pos(self): self.run_task(func_device.select_latter_eng, self.device, "set car position")
-    def cmd_set_demo_simulation_overlay(self): self.run_task(func_device.select_latter_eng, self.device, "demo simulation overlay")
-    def cmd_set_hybrid_navigation_info(self): self.run_task(func_device.select_latter_box_eng, self.device, 'hybrid navigation info', '-')
-    def set_guidance_off(self): self.run_task(func_device.set_guidance_off, self.device)
-    
+    def cmd_rec_video(self): self.run_task(self.aa_manager.record_video, self.and_log_manager)
+    def cmd_tk_screenshot(self): self.run_task(self.aa_manager.record_screenshot, self.and_log_manager)
+    def cmd_demo_on(self): self.run_task(self.nav_ctrl_manager.set_demo_mode, "START")
+    def cmd_demo_stop(self): self.run_task(self.nav_ctrl_manager.set_demo_mode, "STOP")
+    def cmd_demo_pause(self): self.run_task(self.nav_ctrl_manager.set_demo_mode, "PAUSE")
+    def cmd_demo_repeat(self): self.run_task(self.nav_ctrl_manager.set_demo_mode, "REPEAT")
+    def cmd_set_car_pos(self): self.run_task(self.nav_ctrl_manager.select_latter_eng, "set car position")
+    def cmd_set_demo_simulation_overlay(self): self.run_task(self.nav_ctrl_manager.select_latter_eng, "demo simulation overlay")
+    def cmd_set_hybrid_navigation_info(self): self.run_task(self.nav_ctrl_manager.select_latter_box_eng,  'hybrid navigation info', '-')
+
     def cmd_set_mv_debug(self): 
         val, ok = CustomInputDialog.get_int(self, "MV Debug", "Value:", 149)
-        if ok: self.run_task(func_device.select_latter_box_eng, self.device, 'mv debug menu', val)
+        if ok: self.run_task(self.nav_ctrl_manager.select_latter_box_eng, 'mv debug menu', val)
 
     def cmd_demo_speed(self):
         val, ok = CustomInputDialog.get_int(self, "Demo Speed", "Value:", 6)
-        if ok: self.run_task(func_device.select_latter_box_eng, self.device, 'simulation speed', val)
+        if ok: self.run_task(self.nav_ctrl_manager.select_latter_box_eng, 'simulation speed', val)
 
     def cmd_send_txt(self):
         text, ok = CustomInputDialog.get_text(self, "Send Text", "Please write the text you want to input:")
-        if ok: self.run_task(func_device.search_fts, self.device, text)
+        if ok: self.run_task(self.keyboard_manager.search_fts, text)
 
     def cmd_file_upload(self):
         file_path, _ = QFileDialog.getOpenFileName(

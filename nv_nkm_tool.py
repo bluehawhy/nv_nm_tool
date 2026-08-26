@@ -2,26 +2,18 @@
 import os
 import sys
 import re
-import math
 import time
 from PyQt6.QtWidgets import QApplication
-
-
-import pandas as pd
-
 
 # 1. 유틸리티 (설정, 로거 등)
 from src.utils import loggas, configus
 
 # 2. 핵심 로직 및 디바이스 제어 모듈 (core)
 from src.core import (
-    func_device,
+
     call_device,  
-    func_ios, 
-    func_ui_class,
     func_logging,
     func_record_image,
-    location_utils
 )
 from src.automation import(
     scroll_map_and_screenshot
@@ -68,6 +60,7 @@ revision_list=[
     'v0.73 (2026-08-04) : bug fix - demo mode setting.',
     'v0.8 (2026-08-06) : update to use on dada system',
     'v0.81 (2026-08-10) : add filter for log and screenshot to each folder',
+    'v0.82 (2026-08-26) : logic change due to change of UI menu, add android auto capture',
     ]
 
 
@@ -85,12 +78,14 @@ version = f'nkm Tool {last_v}'
 def debug_mode():
     # call_device.start_adb_server()
     devices = call_device.discover_and_connect_device()
-    # ios_control = func_ios.IOSDeviceController(lockdown_device=devices[1]['lockdown_device'])
-    # ios_control.download_photos_by_date('2026-07-16')
-    
-    target_model = 'SM-X820'
-    device = next((d for d in devices if d.get('model') == target_model), None)
-    scroll_map_and_screenshot.start_simualtion(device= device, file_path = r'C:\Users\miskang\Downloads\노면색깔유도선_WGS84_부산_위치별정리.xlsx')
+    device = devices[0]
+    and_log_manager = func_logging.AndroidLogManager(device=device)
+    time.sleep(5)
+    aa_manager = func_record_image.AndroidRecordManager(device, and_log_manager)
+    aa_manager.start()
+    time.sleep(5)
+    aa_manager.record_screenshot(device)
+    #func_device.UIFinder(device=devices[0]).find_location_by_UI_class(["MV Debug"],exact_match=False)
     
 def prod_mode():
     app = QApplication(sys.argv)
@@ -102,12 +97,6 @@ def prod_mode():
 
 if __name__ == '__main__':
     loggas.set_debug_logging(True)
-    # --- 사용 예시 ---
-    #file_path = r"C:/Users/miskang/Downloads/서울특별시_노면색깔유도선 위치 현황_20250417.csv"
-    #location_utils.convert_korea2000_to_wgs_csv(file_path)
-    debug_mode()
-    
-    #loggas.set_debug_logging(True)
-    #call_device.start_adb_server()
-    #prod_mode()
+    #debug_mode()
+    prod_mode()
     

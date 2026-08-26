@@ -82,7 +82,9 @@ class AndroidLogManager:
         # 설정 로드
         self.config = configus.load_config('resources/configs/config.json')
         self.sfm = ScreenshotFilterMatcher(self.config)
-        
+
+        self.record_manager = None
+                
         # 기본 저장 경로 설정
         if folder_path is None:
             folder_path = self.config.get('local_path', './')
@@ -107,6 +109,9 @@ class AndroidLogManager:
         
         # 🚀 [개편] 등록된 패턴 검색 작업 등록 리스트
         self.active_pattern_jobs = []
+
+    def set_record_manager(self, record_manager):
+        self.record_manager = record_manager
 
     def close_connection_by_error(self):
         """UI단 또는 외부에 의해 에러가 감지되었을 때 수집 스레드 및 커넥션을 완전히 강제 종료합니다."""
@@ -191,14 +196,21 @@ class AndroidLogManager:
     def _take_screenshot(self, save_dir):
         """스크린샷 작업을 별도 스레드에서 실행"""
         try:
-            func_record_image.record_screenshot(
-                device=self.device,
-                log_manager=self,
+            if self.record_manager is None:
+                logging.warning(
+                    f"[{self.serial}] "
+                    "AndroidRecordManager가 연결되지 않았습니다."
+                )
+                return
+
+            self.record_manager.record_screenshot(
                 save_dir=save_dir
             )
+
         except Exception as e:
             logging.error(
-                f"[{self.serial}] 스크린샷 캡처 중 오류 발생: {e}"
+                f"[{self.serial}] "
+                f"스크린샷 캡처 중 오류 발생: {e}"
             )
 
     def _live_log_stream_handler(self, connection, debounce_time):
