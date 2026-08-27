@@ -42,7 +42,6 @@ def parse_map_scale_km(log_str):
         return float(match.group(1))
     return None  # 파싱 실패 시 기본값 처리용
 
-
 def parse_location(location_input):
     """
     다양한 형태의 위치 입력값을 {'latitude': float, 'longitude': float} 형태로 표준화합니다.

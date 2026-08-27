@@ -348,11 +348,6 @@ class AndroidLogManager:
         finally:
             connection.close()
 
-
-
-
-
-
     # 🚀 [신규 메서드] 패턴 모니터링 내부 처리기
     def _process_pattern_jobs(self, line):
         if not self.active_pattern_jobs:

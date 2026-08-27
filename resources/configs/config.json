@@ -21,7 +21,7 @@
 		"twd_adb": "72ym@!2026Mdt"
 	},
 	"menu":{
-		"all_menu":["설정","계정정보","Account Information","내 차량","My car","stop navigation","안내종료","개발 설정","engineering"],
+		"all_menu":["설정","Settings","계정정보","Account Information","내 차량","My car","stop navigation","안내종료","개발 설정","engineering","장소 등록/수정 제안","Add / Edit place suggestion"],
 		"eng_menu":["개발 설정","engineering"]
 	}
 }

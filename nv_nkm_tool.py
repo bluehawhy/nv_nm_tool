@@ -82,7 +82,7 @@ def debug_mode():
     # call_device.start_adb_server()
     devices = call_device.discover_and_connect_device()
     device = devices[0]
-    a = func_device.UIFinder(device=device).get_android_auto_menu_location()
+    a = func_device.NaviController(device=device).activate_eng()
     logging.info(a)
 
     
@@ -96,6 +96,6 @@ def prod_mode():
 
 if __name__ == '__main__':
     loggas.set_debug_logging(True)
-    #debug_mode()
-    prod_mode()
+    debug_mode()
+    #prod_mode()
     
