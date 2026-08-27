@@ -203,140 +203,50 @@ class AndroidRecordManager:
         self._thread = None
 
     # =========================================================
-    # 위치 정보 저장
+    # 공통 위치 정보 저장 (내장 함수)
     # =========================================================
 
-    def _save_screenshot_location(
+    def _save_location_txt(
         self,
-        timestamp,
-        local_dir,
-        loca_log
+        car_pos_path,
+        loca_log=True
     ):
         """
-        현재 최신 차량 위치 로그 저장
+        스크린샷 및 비디오 녹화에서 공통으로 사용되는 위치 로그 저장 내장 함수.
+        log_manager의 메모리 변수(latest_car_pos)를 들고와서 location_utils.save_loca 파서를 사용해 저장합니다.
         """
 
         if not loca_log:
-
-            logging.info(
-                "Location logging is disabled "
-                "(loca_log=False)."
-            )
-
+            logging.info("Location logging is disabled (loca_log=False).")
             return
-
-        car_pos_file = (
-            f"Screenshot_{timestamp}_location.txt"
-        )
-
-        car_pos_path = os.path.join(
-            local_dir,
-            car_pos_file
-        )
 
         if not self.log_manager:
-
-            logging.warning(
-                "log_manager가 전달되지 않아 "
-                "위치 로그를 기록하지 못했습니다."
-            )
-
-            with open(
-                car_pos_path,
-                "w",
-                encoding="utf-8"
-            ) as f:
-
-                f.write(
-                    "car_pos: N/A "
-                    "(LogManager is None)"
-                )
-
+            logging.warning("log_manager가 전달되지 않아 위치 로그를 기록하지 못했습니다.")
+            with open(car_pos_path, "w", encoding="utf-8") as f:
+                f.write("car_pos: N/A (LogManager is None)")
             return
 
-        latest_data = getattr(
-            self.log_manager,
-            'latest_car_pos',
-            None
-        )
+        # log_manager의 메모리 변수 추출
+        latest_data = getattr(self.log_manager, 'latest_car_pos', None)
 
         logging.info(
             f"[CAR_POS READ] "
-            f"now="
-            f"{datetime.now().strftime('%H:%M:%S.%f')[:-3]} "
+            f"now={datetime.now().strftime('%H:%M:%S.%f')[:-3]} "
             f"latest={latest_data}"
         )
 
         if not latest_data:
-
-            logging.warning(
-                "No location info captured yet."
-            )
-
-            with open(
-                car_pos_path,
-                "w",
-                encoding="utf-8"
-            ) as f:
-
-                f.write(
-                    "car_pos: N/A "
-                    "(Log not detected)"
-                )
-
+            logging.warning("No location info captured in memory yet.")
+            with open(car_pos_path, "w", encoding="utf-8") as f:
+                f.write("car_pos: N/A (Log not detected)")
             return
 
-        # -----------------------------------------------------
-        # tuple 구조
-        # (pc_time, log_line)
-        # -----------------------------------------------------
-
-        if isinstance(latest_data, tuple):
-
-            pc_time, log_line = latest_data
-
-            logging.info(
-                f"Location info captured "
-                f"(Recv: {pc_time}): "
-                f"{log_line.strip()}"
-            )
-
-            with open(
-                car_pos_path,
-                "w",
-                encoding="utf-8"
-            ) as f:
-
-                f.write(
-                    f"[PC Recv Time]: "
-                    f"{pc_time}\n"
-                )
-
-                f.write(
-                    f"[Log Raw Line]: "
-                    f"{log_line}\n"
-                )
-
-        # -----------------------------------------------------
-        # 기존 문자열 구조
-        # -----------------------------------------------------
-
-        else:
-
-            logging.info(
-                f"Location info captured: "
-                f"{latest_data.strip()}"
-            )
-
-            with open(
-                car_pos_path,
-                "w",
-                encoding="utf-8"
-            ) as f:
-
-                f.write(
-                    latest_data + "\n"
-                )
+        # location_utils 파서를 호출하여 위치 정보 저장
+        try:
+            location_utils.save_loca(latest_data[1], car_pos_path)
+            logging.info(f"Successfully saved location txt via location_utils to: {car_pos_path}")
+        except Exception as e:
+            logging.error(f"Failed to save location info via location_utils: {e}")
 
     # =========================================================
     # Android Auto Screenshot
@@ -483,6 +393,7 @@ class AndroidRecordManager:
     # =========================================================
     # Screenshot
     # =========================================================
+
     def record_screenshot(
         self,
         loca_log=True,
@@ -493,7 +404,7 @@ class AndroidRecordManager:
 
         항상:
         - 기본 Android 화면 캡처
-        - 위치 정보 저장
+        - 위치 정보 저장 (_save_location_txt 내장함수 사용)
 
         Android Auto Display ID가 존재하면:
         - Android Auto 화면도 추가 캡처
@@ -509,6 +420,10 @@ class AndroidRecordManager:
 
         screenshot_file_aa = (
             f"Screenshot_{timestamp}_android_auto.png"
+        )
+
+        car_pos_file = (
+            f"Screenshot_{timestamp}_location.txt"
         )
 
         local_dir = (
@@ -527,14 +442,18 @@ class AndroidRecordManager:
             screenshot_file_aa
         )
 
+        car_pos_path = os.path.join(
+            local_dir,
+            car_pos_file
+        )
+
         # -----------------------------------------------------
-        # 위치 정보 저장
+        # 위치 정보 저장 (공통 내장 함수 호출)
         # -----------------------------------------------------
 
-        self._save_screenshot_location(
-            timestamp,
-            local_dir,
-            loca_log
+        self._save_location_txt(
+            car_pos_path,
+            loca_log=loca_log
         )
 
         # -----------------------------------------------------
@@ -614,7 +533,8 @@ class AndroidRecordManager:
     def record_video(
         self,
         duration=None,
-        save_dir=None
+        save_dir=None,
+        loca_log=True
     ):
         """
         비디오 녹화 및 위치 정보 캡처 수행
@@ -666,8 +586,7 @@ class AndroidRecordManager:
             )
 
             car_pos_file = (
-                f"Screen_Recording_{timestamp}"
-                f"_location.txt"
+                f"Screen_Recording_{timestamp}_location.txt"
             )
 
             res = self.device.get(
@@ -701,85 +620,13 @@ class AndroidRecordManager:
             )
 
             # -------------------------------------------------
-            # 위치 로그 수집
+            # 위치 로그 저장 (공통 내장 함수 호출)
             # -------------------------------------------------
 
-            if self.log_manager:
-
-                tmp_log_file_path = (
-                    "resources/info/"
-                    "loca_info_video.txt"
-                )
-
-                if os.path.exists(
-                    tmp_log_file_path
-                ):
-
-                    try:
-                        os.remove(
-                            tmp_log_file_path
-                        )
-                    except Exception:
-                        pass
-
-                results = {}
-
-                loca_stop_signal = (
-                    self.log_manager.fetch_log_from_list(
-                        search_patterns={
-                            'car_pos': ".*win 0 SFN.*"
-                        },
-                        file_path=tmp_log_file_path,
-                        result_dict=results,
-                        timeout_seconds=2
-                    )
-                )
-
-                loca_stop_signal.wait(
-                    timeout=2
-                )
-
-                if 'car_pos' in results:
-
-                    logging.info(
-                        f"[{device_obj_serial}] "
-                        f"Location info found: "
-                        f"{results['car_pos']}"
-                    )
-
-                    location_utils.save_loca(
-                        results['car_pos'],
-                        car_pos_path
-                    )
-
-                else:
-
-                    logging.warning(
-                        f"[{device_obj_serial}] "
-                        "No location info captured "
-                        "in 2 seconds."
-                    )
-
-                    with open(
-                        car_pos_path,
-                        "w",
-                        encoding="utf-8"
-                    ) as f:
-
-                        f.write(
-                            "car_pos: N/A "
-                            "(Log not detected)"
-                        )
-
-                loca_stop_signal.set()
-
-            else:
-
-                logging.warning(
-                    f"[{device_obj_serial}] "
-                    "log_manager가 제공되지 않아 "
-                    "위치 정보를 수집하지 않습니다."
-                )
+            self._save_location_txt(
+                car_pos_path,
+                loca_log=loca_log
+            )
 
             # -------------------------------------------------
             # 녹화 시작

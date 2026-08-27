@@ -96,6 +96,6 @@ def prod_mode():
 
 if __name__ == '__main__':
     loggas.set_debug_logging(True)
-    debug_mode()
-    #prod_mode()
+    #debug_mode()
+    prod_mode()
     
