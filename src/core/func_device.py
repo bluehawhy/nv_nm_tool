@@ -785,6 +785,56 @@ class UIFinder:
 
         return False
 
+    def get_android_auto_menu_location(self):
+        xml_str = self.device["u2_device"].dump_hierarchy(compressed=True)
+
+        target_keys = {"검색", "설정", "상세경로", "HUD"}
+
+        # 1. navis.ncn.navi 패키지의 ImageView (버튼) 4개 좌표 추출
+        img_pattern = re.compile(
+            r'<node[^>]*class="android\.widget\.ImageView"[^>]*package="navis\.ncn\.navi"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"'
+        )
+        image_buttons = []
+        for match in img_pattern.finditer(xml_str):
+            x1, y1, x2, y2 = map(int, match.groups())
+            center_x = (x1 + x2) // 2
+            center_y = (y1 + y2) // 2
+            image_buttons.append({"x": center_x, "y": center_y})
+
+        # ImageView가 정확히 4개가 아니면 일반 모드로 판단
+        if len(image_buttons) != 4:
+            return None
+
+        # 2. 텍스트 라벨 노드 탐색 및 중복 제거 (각 키워드별 x좌표 수집)
+        label_pattern = re.compile(
+            r'<node[^>]*package="navis\.ncn\.navi"[^>]*content-desc="(검색|설정|상세경로|HUD)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"'
+        )
+        labels = {}
+        for match in label_pattern.finditer(xml_str):
+            key, x1, y1, x2, y2 = match.groups()
+            if key not in labels:  # 텍스트 노드가 2개씩 수집되므로 중복은 무시
+                center_x = (int(x1) + int(x2)) // 2
+                center_y = (int(y1) + int(y2)) // 2
+                labels[key] = {"x": center_x, "y": center_y}
+
+        # 4개 라벨이 모두 존재하지 않으면 일반 모드로 판단
+        if len(labels) != 4:
+            return None
+
+        # 3. 라벨과 x, y 거리가 가장 가까운 ImageView 매핑
+        result = {}
+        for key, label_pos in labels.items():
+            # 라벨 위치 기준으로 x축 정렬 거리가 가장 가까운 ImageView 탐색
+            # (ImageView는 라벨 '위'에 존재하므로 img_y < label_y 조건 추가 검증 가능)
+            closest_button = min(
+                image_buttons,
+                key=lambda btn: (btn["x"] - label_pos["x"]) ** 2
+                + (btn["y"] - label_pos["y"]) ** 2,
+            )
+            result[key] = closest_button
+
+        return result
+
     def find_location_by_UI_class(self, letters, package_name=None, exact_match=True):
         """특정 단어(letters)에 해당하는 UI 노드의 중심 좌표를 검색합니다."""
         root = self._dump_and_parse_xml()
@@ -900,7 +950,6 @@ class UIFinder:
 
         except Exception as e:
             logging.error(f"영역 버튼 추적 중 에러 발생: {e}", exc_info=True)
-
         return None
 
     def find_eng_back_button_by_UI(self):
@@ -1100,6 +1149,21 @@ class NaviController(TouchController):
 
     def open_navi_setting(self) -> bool:
         """내비게이션 설정 메뉴를 열고 상태를 반환합니다."""
+        # 1. 이게 안드로이드 조건인지 아닌지 부터 확인
+        self.aa_checker = self.ui_finder.get_android_auto_menu_location()
+        if self.aa_checker is not None:
+            logging.info(f"Android Auto 모드가 감지되었습니다. - {self.aa_checker}")
+
+            # '설정' 좌표가 정상적으로 포함되어 있는지 확인
+            setting_coord = self.aa_checker.get("설정")
+            logging.info(f'설정 위치 -{setting_coord}')
+            if setting_coord:
+                self.one_finger_touch(setting_coord)
+                return True
+            else:
+                logging.info(f"[{self.serial}] Android Auto 모드가 감지되었는데, 설정아이콘이 안보입니다.")
+                return False        
+
         # 1. 설정이 이미 있는지 확인
         set_locations = self.ui_finder.find_location_by_UI_class(
             ['설정', 'Settings'], package_name='navis.ncn.navi'

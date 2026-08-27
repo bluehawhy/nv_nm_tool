@@ -10,7 +10,7 @@ from src.utils import loggas, configus
 
 # 2. 핵심 로직 및 디바이스 제어 모듈 (core)
 from src.core import (
-
+    func_device,
     call_device,  
     func_logging,
     func_record_image,
@@ -60,7 +60,7 @@ revision_list=[
     'v0.73 (2026-08-04) : bug fix - demo mode setting.',
     'v0.8 (2026-08-06) : update to use on dada system',
     'v0.81 (2026-08-10) : add filter for log and screenshot to each folder',
-    'v0.82 (2026-08-26) : logic change due to change of UI menu, add android auto capture',
+    'v0.82 (2026-08-27) : logic change due to change of UI menu, add fucntion for andriod auto',
     ]
 
 
@@ -73,19 +73,17 @@ for item in reversed(revision_list):
 
 # 2. 찾은 버전을 툴 이름 뒤에 붙여줍니다.
 version = f'nkm Tool {last_v}'
+import re
+
 
 
 def debug_mode():
     # call_device.start_adb_server()
     devices = call_device.discover_and_connect_device()
     device = devices[0]
-    and_log_manager = func_logging.AndroidLogManager(device=device)
-    time.sleep(5)
-    aa_manager = func_record_image.AndroidRecordManager(device, and_log_manager)
-    aa_manager.start()
-    time.sleep(5)
-    aa_manager.record_screenshot(device)
-    #func_device.UIFinder(device=devices[0]).find_location_by_UI_class(["MV Debug"],exact_match=False)
+    a = func_device.UIFinder(device=device).get_android_auto_menu_location()
+    logging.info(a)
+
     
 def prod_mode():
     app = QApplication(sys.argv)
