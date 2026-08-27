@@ -60,7 +60,8 @@ revision_list=[
     'v0.73 (2026-08-04) : bug fix - demo mode setting.',
     'v0.8 (2026-08-06) : update to use on dada system',
     'v0.81 (2026-08-10) : add filter for log and screenshot to each folder',
-    'v0.82 (2026-08-27) : logic change due to change of UI menu, add fucntion for andriod auto',
+    'v0.82 (2026-08-11) : add fucntion for tata',
+    'v0.83 (2026-08-27) : logic change due to change of UI menu, add fucntion for andriod auto',
     ]
 
 
