@@ -541,7 +541,6 @@ class AndroidRecordManager:
         """
 
         if duration is None:
-
             duration = self.config[
                 'video_recording_duration'
             ]

@@ -483,7 +483,7 @@ class AndroidLogManager:
                             self.active_pattern_jobs.remove(job)
                     stop_event.set()
                     break
-                time.sleep(1)
+                time.sleep(0.5)
 
         threading.Thread(target=_timeout_checker, daemon=True).start()
         return stop_event

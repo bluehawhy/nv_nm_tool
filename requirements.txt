@@ -1,0 +1,8 @@
+pandas==3.0.5
+pymobiledevice3==11.1.6
+pyproj==3.7.2
+PyQt6==6.11.0
+pyqt6_sip==13.11.1
+pyserial==3.5
+uiautomator2==3.7.0
+wmi==1.5.1

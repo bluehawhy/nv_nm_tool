@@ -947,9 +947,8 @@ class MainWindow(QMainWindow):
     # 각 버튼 액션들
     def cmd_gotoeng(self): self.run_task(self.nav_ctrl_manager.go_to_eng_mode, )
     def cmd_activate_eng(self): self.run_task(self.nav_ctrl_manager.activate_eng,)
-    def cmd_react_adb(self): self.run_task(call_device.react_adb)
-    def cmd_rec_video(self): self.run_task(self.aa_manager.record_video, self.and_log_manager)
-    def cmd_tk_screenshot(self): self.run_task(self.aa_manager.record_screenshot, self.and_log_manager)
+    def cmd_rec_video(self): self.run_task(self.aa_manager.record_video,)
+    def cmd_tk_screenshot(self): self.run_task(self.aa_manager.record_screenshot,)
     def cmd_demo_on(self): self.run_task(self.nav_ctrl_manager.set_demo_mode, "START")
     def cmd_demo_stop(self): self.run_task(self.nav_ctrl_manager.set_demo_mode, "STOP")
     def cmd_demo_pause(self): self.run_task(self.nav_ctrl_manager.set_demo_mode, "PAUSE")
@@ -989,7 +988,7 @@ class MainWindow(QMainWindow):
         try:
             if hasattr(self, 'last_push_status'):
                 del self.last_push_status
-            func_device.push_file_background(self.device, file_path, remote_path)
+            func_device.TouchController(self.device).push_file_background(file_path, remote_path)
             self.log(f"[Push Started] {file_name}")
             if not hasattr(self, 'push_check_timer'):
                 self.push_check_timer = QTimer(self)
