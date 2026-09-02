@@ -190,8 +190,6 @@ class AndroidLogManager:
         finally:
             logging.info(f"[{self.serial}] 로그 수집 쓰레드 최종 종료")
 
-
-
     # 🚀 [신규 메서드] 스크린샷 캡처를 별도 스레드에서 수행
     def _take_screenshot(self, save_dir):
         """스크린샷 작업을 별도 스레드에서 실행"""
@@ -361,16 +359,25 @@ class AndroidLogManager:
                         if match:
                             extracted_value = (match.group(1) if match.groups() else match.group()).strip()
                             job['found_versions'][key] = extracted_value
-                            
-                            try:
-                                with open(job['file_path'], "a", encoding="utf-8") as f:
-                                    f.write(f"{key}: {extracted_value}\n")
-                                logging.info(f"[{self.serial}] 패턴 기록 완료! [{key}] -> {extracted_value}")
-                                
-                                if job['result_dict'] is not None:
+
+                            if job.get('pattern_only'):
+                                if job.get('result_dict') is not None:
                                     job['result_dict'][key] = extracted_value
-                            except Exception as file_err:
-                                logging.error(f"파일 기록 오류: {file_err}")
+                                logging.info(
+                                    f"[{self.serial}] 패턴 검색 완료! [{key}] -> {extracted_value}"
+                                )
+                            else:
+                                try:
+                                    with open(job['file_path'], "a", encoding="utf-8") as f:
+                                        f.write(f"{key}: {extracted_value}\n")
+                                    logging.info(
+                                        f"[{self.serial}] 패턴 기록 완료! [{key}] -> {extracted_value}"
+                                    )
+
+                                    if job.get('result_dict') is not None:
+                                        job['result_dict'][key] = extracted_value
+                                except Exception as file_err:
+                                    logging.error(f"파일 기록 오류: {file_err}")
 
                 # 모든 패턴 탐색 완료 시 작업 해제
                 if len(job['found_versions']) >= len(job['search_patterns']):
@@ -448,23 +455,37 @@ class AndroidLogManager:
             return False
 
     # 🚀 [통합] 패턴 작업을 라이브 스레드에 작업으로 등록하여 수집
-    def fetch_log_from_list(self, search_patterns, file_path, result_dict=None, timeout_seconds=300):
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        
+    def fetch_log_from_list(self, search_patterns, file_path=None, result_dict=None, timeout_seconds=300):
         stop_event = threading.Event()
 
-        if os.path.exists(file_path):
-            with open(file_path, "r", encoding="utf-8") as f:
-                content = f.read()
+        if file_path:
+            file_dir = os.path.dirname(file_path)
+            if file_dir:
+                os.makedirs(file_dir, exist_ok=True)
+
+            if os.path.exists(file_path):
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
                 if all(f"{key}:" in content for key in search_patterns.keys()):
+                    if result_dict is not None:
+                        for key in search_patterns.keys():
+                            match = re.search(
+                                rf"^{re.escape(key)}:\s*(.+)$", content, re.MULTILINE
+                            )
+                            if match:
+                                result_dict[key] = match.group(1).strip()
                     stop_event.set()
                     return stop_event
+
+        if result_dict is None:
+            result_dict = {}
 
         job = {
             'search_patterns': search_patterns,
             'compiled_patterns': {key: re.compile(pattern) for key, pattern in search_patterns.items()},
             'file_path': file_path,
             'result_dict': result_dict,
+            'pattern_only': file_path is None,
             'found_versions': {},
             'stop_event': stop_event,
             'start_time': time.time()

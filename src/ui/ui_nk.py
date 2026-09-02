@@ -260,15 +260,10 @@ class MainWindow(QMainWindow):
         self.lock_buttons = [] # 상호 충돌 방지를 위해 묶어서 비활성화할 버튼 목록
         self.log_stop_signal = None
         self.version_stop_signal = None
+        self.version_info = {}       # 실시간 로그에서 수집한 디바이스 버전 정보
 
         # 드래그 이동을 위한 좌표 저장 변수
         self.drag_pos = None
-
-        # 프로그램 시작 시 기존 버전 정보 파일 초기화
-        version_file = "resources/info/version_info.txt"
-        if os.path.exists(version_file):
-            os.remove(version_file)
-            logging.info("start program - remove version_info.txt")
 
         # 상태값 초기화
         self.sw_version = "Checking..."
@@ -724,75 +719,74 @@ class MainWindow(QMainWindow):
     def start_version_collector(self):
         if not self.device:
             return
-            
-        version_file = "resources/info/version_info.txt"
+
         if self.version_found_flag:
             return
+
         if self.version_stop_signal and not self.version_stop_signal.is_set():
             return
-        
+
         search_dict = self.current_config.get('version_filter', {
-            'sw_version': r"[VT]\d{3}\.\d{2}_\d{6}", 
+            'sw_version': r"[VT]\d{3}\.\d{2}_\d{6}",
             'map_version': r"(?i)(?:versionid|ndsversion)[:\(\s]*(\d{5})"
         })
-        
-        # [수정] and_log_manager가 없으면 동작하지 않음
+
         if self.and_log_manager is None:
             return
 
+        # 버전 정보는 파일로 저장하지 않고 메모리 딕셔너리로 직접 수집
+        self.version_info.clear()
         self.version_stop_signal = self.and_log_manager.fetch_log_from_list(
-            search_patterns=search_dict, 
-            file_path=version_file, 
-            result_dict={}
+            search_patterns=search_dict,
+            result_dict=self.version_info
         )
-        
+
         logging.info("Version info collector started.")
 
     def update_version_info(self):
-        # 1. 장치 변수가 없으면 즉시 리턴
         if self.device is None:
             return
 
-        # 2. 버전을 아직 다 못 찾았고, 백그라운드 스레드가 종료(stop_signal set)된 경우
         if self.device and not self.version_found_flag:
             if self.version_stop_signal and self.version_stop_signal.is_set():
-                
-                # 🟢 [핵심] 재시작하기 전에 디바이스가 진짜 연결되어 있는지 실제로 확인!
                 if call_device.is_device_connected(self.device):
-                    logging.warning("Background thread died before finding all info. Restarting...")
-                    self.restart_background_tasks()
+                    # 패턴 검색이 완료되었거나 타임아웃된 경우 상태를 확인
+                    sw_version = self.version_info.get('sw_version')
+                    map_version = self.version_info.get('map_version')
+
+                    if sw_version:
+                        self.sw_version = sw_version
+                    if map_version:
+                        self.map_version = map_version
+
+                    if self.sw_version != "Checking..." and self.map_version != "Checking...":
+                        self.version_found_flag = True
+                        logging.info("모든 버전 정보 수집 완료. 더 이상 스레드를 재시작하지 않습니다.")
+                        self.timer.stop()
+                    else:
+                        logging.warning("Background thread died before finding all info. Restarting...")
+                        self.restart_background_tasks()
                 else:
-                    # 장치가 실제로 끊어진 상태라면 재시작하지 않고 disconnect 수행
                     logging.warning("Device disconnected unexpectedly. Triggering disconnect_device()...")
                     self.disconnect_device()
-                    return  # 연결이 해제되었으므로 아래 파일 읽기 동작 중단
+                    return
 
-        # 3. 버전 정보 파일 읽기 로직
-        version_info_file_path = "resources/info/version_info.txt"
-        if os.path.exists(version_info_file_path):
-            try:
-                with open(version_info_file_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                    
-                    map_match = re.search(r"map_version:\s*(\d+)", content)
-                    if map_match: 
-                        self.map_version = map_match.group(1)
-                    
-                    sw_match = re.search(r"sw_version:\s*([VT]\d{3}\.\d{2}_\d{6})", content)
-                    if sw_match: 
-                        self.sw_version = sw_match.group(1)
-                    
-                    if self.sw_version != "Checking..." and self.map_version != "Checking...":
-                        if not self.version_found_flag:
-                            self.version_found_flag = True
-                            logging.info("모든 버전 정보 수집 완료. 더 이상 스레드를 재시작하지 않습니다.")
-                            self.timer.stop()
-                    
-                    logging.info(f"업데이트 완료: SW:{self.sw_version}, Map:{self.map_version}")
-                    self.refresh_display()
-                    
-            except Exception as e:
-                logging.error(f"Error parsing version info: {e}")
+        sw_version = self.version_info.get('sw_version')
+        map_version = self.version_info.get('map_version')
+
+        if sw_version:
+            self.sw_version = sw_version
+        if map_version:
+            self.map_version = map_version
+
+        if self.sw_version != "Checking..." and self.map_version != "Checking...":
+            if not self.version_found_flag:
+                self.version_found_flag = True
+                logging.info("모든 버전 정보 수집 완료. 더 이상 스레드를 재시작하지 않습니다.")
+                self.timer.stop()
+
+        logging.info(f"업데이트 완료: SW:{self.sw_version}, Map:{self.map_version}")
+        self.refresh_display()
 
     def refresh_display(self):
         info_html = f"""
