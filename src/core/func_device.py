@@ -1396,18 +1396,18 @@ class NaviController(TouchController):
         eng_flag = self.go_to_eng_mode()
         if not eng_flag:
             return False  # 기존 return 0 대신 확실한 실패 플래그 반환
-        scroll_flag = self.swipe_window_til_latter(search_latter)
-        if not scroll_flag:
+        target_location = self.swipe_window_til_latter(search_latter)
+        if not target_location:
             print(f" {search_latter} UI 탐색 실패")
             return False
-        location = self.ui_finder.find_location_by_UI_class(letters=[search_latter])
-        logging.info(f'location - {location}')
-        if location is None:
-            print(f'please check {search_latter} in eng mode')
-            return 0
-        else:
-            self.one_finger_touch(location[search_latter.lower()])
-            # 7. 화면 닫기 및 정리 (self.button_info 딕셔너리가 전역 또는 내부에 선언되어 있다고 가정)
+
+        # 스크롤 탐색이 반환한 좌표는 같은 UI 덤프에서 검증된 값이다.
+        # 여기서 다시 덤프하면 스크롤 애니메이션 중 좌표가 달라질 수 있으므로
+        # 재탐색하지 않고 이 좌표를 그대로 터치한다.
+        logging.info(f"'{search_latter}' 확정 위치 사용: {target_location}")
+        self.one_finger_touch(target_location)
+
+        # 7. 화면 닫기 및 정리 (self.button_info 딕셔너리가 전역 또는 내부에 선언되어 있다고 가정)
         try:
             self.one_finger_touch(self.button_info['eng_back'])
             self.one_finger_touch(self.button_info['ui_set_off'])
