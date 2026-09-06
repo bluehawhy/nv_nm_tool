@@ -5,7 +5,6 @@ import threading
 import time
 from contextlib import ExitStack
 from datetime import datetime
-from ..core import func_record_image
 from ..utils import configus, loggas
 from collections import deque
 
