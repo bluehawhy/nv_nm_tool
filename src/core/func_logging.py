@@ -353,6 +353,10 @@ class AndroidLogManager:
 
         with self.lock:
             for job in list(self.active_pattern_jobs):
+                # 취소된 작업은 다음 로그 처리 시 정리한다.
+                if job['stop_event'].is_set():
+                    self.active_pattern_jobs.remove(job)
+                    continue
                 for key, pattern_re in list(job['compiled_patterns'].items()):
                     if key not in job['found_versions']:
                         match = pattern_re.search(line)
@@ -363,6 +367,8 @@ class AndroidLogManager:
                             if job.get('pattern_only'):
                                 if job.get('result_dict') is not None:
                                     job['result_dict'][key] = extracted_value
+                                if job.get('on_result') is not None:
+                                    job['on_result'](dict(job['result_dict']))
                                 logging.info(
                                     f"[{self.serial}] 패턴 검색 완료! [{key}] -> {extracted_value}"
                                 )
@@ -376,6 +382,8 @@ class AndroidLogManager:
 
                                     if job.get('result_dict') is not None:
                                         job['result_dict'][key] = extracted_value
+                                    if job.get('on_result') is not None:
+                                        job['on_result'](dict(job['result_dict']))
                                 except Exception as file_err:
                                     logging.error(f"파일 기록 오류: {file_err}")
 
@@ -455,7 +463,14 @@ class AndroidLogManager:
             return False
 
     # 🚀 [통합] 패턴 작업을 라이브 스레드에 작업으로 등록하여 수집
-    def fetch_log_from_list(self, search_patterns, file_path=None, result_dict=None, timeout_seconds=300):
+    def fetch_log_from_list(
+        self,
+        search_patterns,
+        file_path=None,
+        result_dict=None,
+        timeout_seconds=300,
+        on_result=None,
+    ):
         stop_event = threading.Event()
 
         if file_path:
@@ -488,7 +503,8 @@ class AndroidLogManager:
             'pattern_only': file_path is None,
             'found_versions': {},
             'stop_event': stop_event,
-            'start_time': time.time()
+            'start_time': time.time(),
+            'on_result': on_result,
         }
 
         with self.lock:
