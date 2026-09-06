@@ -1588,13 +1588,13 @@ class NaviController(TouchController):
             prev_xml = current_xml
 
             # 8. 찾지 못했거나 화면 범위 밖에 있으므로 스크롤 다운 수행
-            time.sleep(0.1)
             logging.info(f"Searching... '{latter}' 탐색을 위해 스크롤 진행")
             self.swipe(
                 pos1={'x': location['x'], 'y': swipe_start_y}, 
                 pos2={'x': location['x'], 'y': swipe_end_y}, 
                 duration=300
             )
+            time.sleep(0.3) # 스크롤 후 UI 안정화 대기
 
 
     def scroll_map_to_location(
