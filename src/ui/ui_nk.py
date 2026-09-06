@@ -236,6 +236,9 @@ class TwdAdbWidget(QWidget):
 
 # --- 4. 메인 GUI 클래스 ---
 class MainWindow(QMainWindow):
+    # 로그 수집 워커에서 emit하면 Qt가 메인(UI) 스레드에서 슬롯을 실행한다.
+    version_info_updated = pyqtSignal(object)
+
     def __init__(self, version, revision):
         super().__init__()
         t0 = time.time()
@@ -261,6 +264,7 @@ class MainWindow(QMainWindow):
         self.log_stop_signal = None
         self.version_stop_signal = None
         self.version_info = {}       # 실시간 로그에서 수집한 디바이스 버전 정보
+        self.version_info_updated.connect(self._apply_version_info)
 
         # 드래그 이동을 위한 좌표 저장 변수
         self.drag_pos = None
@@ -738,10 +742,33 @@ class MainWindow(QMainWindow):
         self.version_info.clear()
         self.version_stop_signal = self.and_log_manager.fetch_log_from_list(
             search_patterns=search_dict,
-            result_dict=self.version_info
+            result_dict=self.version_info,
+            on_result=self.version_info_updated.emit
         )
 
         logging.info("Version info collector started.")
+
+    def _apply_version_info(self, version_info):
+        """로그 워커가 패턴 하나를 찾을 때마다 UI 스레드에서 즉시 반영한다."""
+        if self.device is None:
+            return
+
+        sw_version = version_info.get('sw_version')
+        map_version = version_info.get('map_version')
+        changed = False
+
+        if sw_version and sw_version != self.sw_version:
+            self.sw_version = sw_version
+            changed = True
+        if map_version and map_version != self.map_version:
+            self.map_version = map_version
+            changed = True
+
+        if changed:
+            logging.info(
+                f"버전 정보 즉시 반영: SW:{self.sw_version}, Map:{self.map_version}"
+            )
+            self.refresh_display()
 
     def update_version_info(self):
         if self.device is None:
