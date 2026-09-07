@@ -63,6 +63,7 @@ revision_list=[
     'v0.82 (2026-08-11) : add fucntion for tata',
     'v0.83 (2026-08-27) : logic change due to change of UI menu, add fucntion for andriod auto',
     'v0.831 (2026-08-28) : fix current location convert logic',
+    'v0.832 (2026-09-07) : carposition logic change, version check logic change',
     ]
 
 
