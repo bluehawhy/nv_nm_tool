@@ -785,13 +785,7 @@ class AndroidRecordManager:
         if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
             raise RuntimeError("Android Auto 영상 생성에 실패했습니다.")
 
-    def record_video(
-        self,
-        duration=None,
-        save_dir=None,
-        loca_log=True,
-        android_auto_fps=10
-    ):
+    def record_video(self,duration=None,save_dir=None,loca_log=True,android_auto_fps=10):
         """
         기본 Android 화면과 Android Auto 화면을 동시에 촬영한다.
 
@@ -818,11 +812,7 @@ class AndroidRecordManager:
         car_pos_file = f"Screen_Recording_{timestamp}_location.txt"
 
         res = self.device.get('resolution', 'unknown')
-        remote_video_dir = (
-            "/sdcard"
-            if res == '1920x720'
-            else "/sdcard/DCIM/Screenshots"
-        )
+        remote_video_dir = ("/sdcard"if res == '1920x720' else "/sdcard/DCIM/Screenshots")
 
         remote_video_path = f"{remote_video_dir}/{video_file}"
         remote_frame_dir = f"/sdcard/aa_video_frames_{timestamp}"
