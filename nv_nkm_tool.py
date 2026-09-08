@@ -64,6 +64,7 @@ revision_list=[
     'v0.83 (2026-08-27) : logic change due to change of UI menu, add fucntion for andriod auto',
     'v0.831 (2026-08-28) : fix current location convert logic',
     'v0.832 (2026-09-07) : carposition logic change, version check logic change',
+    'v0.84 (2026-09-08) : android auto video record function add',
     ]
 
 
@@ -83,7 +84,7 @@ def debug_mode():
     device = devices[0]
     log_manager = func_logging.AndroidLogManager(device=device)    
     record_manager =func_record.AndroidRecordManager(device=device,log_manager=log_manager)
-    record_manager.record_video(duration=10)
+    record_manager.record_video()
 
     
 def prod_mode():
@@ -96,6 +97,6 @@ def prod_mode():
 
 if __name__ == '__main__':
     loggas.set_debug_logging(True)
-    debug_mode()
-    #prod_mode()
+    #debug_mode()
+    prod_mode()
     
