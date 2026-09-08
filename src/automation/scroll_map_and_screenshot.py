@@ -119,7 +119,7 @@ def start_simualtion(device: dict = None, file_path: str = None, colunm_loca_hea
             
             if scroll_result:
                 time.sleep(2)
-                screenshot_path = func_record_image.record_screenshot(
+                screenshot_path = func_record.record_screenshot(
                     device=device, 
                     log_manager=logmanager, 
                     save_dir=save_dir
