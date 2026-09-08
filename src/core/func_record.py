@@ -537,6 +537,327 @@ class AndroidRecordManager:
         loca_log=True
     ):
         """
+        기본 Android 화면과 Android Auto 화면을 동시에 녹화한다.
+        """
+
+        if duration is None:
+            duration = self.config['video_recording_duration']
+
+        device_obj_serial = self.device_obj.serial
+
+        logging.info(
+            f"[*] 비디오 녹화 시작 "
+            f"(기기: {device_obj_serial}, 시간: {duration}초)"
+        )
+
+        try:
+            # -------------------------------------------------
+            # 기존 screenrecord 프로세스 종료
+            # -------------------------------------------------
+
+            logging.info(
+                f"[{device_obj_serial}] "
+                "기존 screenrecord 프로세스 정리 중..."
+            )
+
+            self.device_obj.shell("pkill -9 screenrecord")
+            time.sleep(0.5)
+
+            # 녹화 시작 전에 Android Auto Display ID 확보
+            display_id = self.get_display_id()
+
+            if not display_id:
+                display_id = self.find_display_id()
+
+            # -------------------------------------------------
+            # 파일 경로 생성
+            # -------------------------------------------------
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            video_file = (
+                f"Screen_Recording_{timestamp}.mp4"
+            )
+
+            video_file_aa = (
+                f"Screen_Recording_{timestamp}_android_auto.mp4"
+            )
+
+            car_pos_file = (
+                f"Screen_Recording_{timestamp}_location.txt"
+            )
+
+            res = self.device.get('resolution', 'unknown')
+
+            if res == '1920x720':
+                remote_dir = "/sdcard"
+            else:
+                remote_dir = "/sdcard/DCIM/Screenshots"
+
+            remote_path = (
+                f"{remote_dir}/{video_file}"
+            )
+
+            remote_path_aa = (
+                f"{remote_dir}/{video_file_aa}"
+            )
+
+            local_dir = (
+                save_dir
+                if save_dir
+                else self.config['local_path']
+            )
+
+            os.makedirs(local_dir, exist_ok=True)
+
+            local_path = os.path.join(
+                local_dir,
+                video_file
+            )
+
+            local_path_aa = os.path.join(
+                local_dir,
+                video_file_aa
+            )
+
+            car_pos_path = os.path.join(
+                local_dir,
+                car_pos_file
+            )
+
+            # -------------------------------------------------
+            # 위치 정보 저장
+            # -------------------------------------------------
+
+            self._save_location_txt(
+                car_pos_path,
+                loca_log=loca_log
+            )
+
+            recording_errors = []
+
+            # -------------------------------------------------
+            # 기본 Android 화면 녹화 함수
+            # -------------------------------------------------
+
+            def record_main_display():
+                try:
+                    logging.info(
+                        f"[{device_obj_serial}] "
+                        "기본 화면 녹화 시작"
+                    )
+
+                    result = self.device_obj.shell(
+                        f"screenrecord {remote_path}"
+                    )
+
+                    if result:
+                        logging.debug(
+                            f"[MAIN SCREENRECORD RESULT] {result}"
+                        )
+
+                except Exception as e:
+                    recording_errors.append(
+                        f"기본 화면 녹화 실패: {e}"
+                    )
+
+                    logging.error(
+                        f"[{device_obj_serial}] "
+                        f"기본 화면 녹화 실패: {e}"
+                    )
+
+            # -------------------------------------------------
+            # Android Auto 화면 녹화 함수
+            # -------------------------------------------------
+
+            def record_android_auto():
+                try:
+                    logging.info(
+                        "[ANDROID AUTO] "
+                        f"화면 녹화 시작 "
+                        f"(display={display_id})"
+                    )
+
+                    result = self.device_obj.shell(
+                        f"screenrecord "
+                        f"--display-id {display_id} "
+                        f"{remote_path_aa}"
+                    )
+
+                    result_text = result or ""
+
+                    if (
+                        "not found" in result_text.lower()
+                        or "unknown option" in result_text.lower()
+                        or "invalid display" in result_text.lower()
+                        or "failed" in result_text.lower()
+                    ):
+                        raise RuntimeError(
+                            result_text.strip()
+                        )
+
+                    if result_text:
+                        logging.debug(
+                            "[ANDROID AUTO SCREENRECORD RESULT] "
+                            f"{result_text}"
+                        )
+
+                except Exception as e:
+                    recording_errors.append(
+                        f"Android Auto 녹화 실패: {e}"
+                    )
+
+                    logging.error(
+                        "[ANDROID AUTO] "
+                        f"화면 녹화 실패: {e}"
+                    )
+
+            # -------------------------------------------------
+            # 두 화면 동시 녹화 시작
+            # -------------------------------------------------
+
+            main_record_thread = threading.Thread(
+                target=record_main_display,
+                daemon=True,
+                name="MainDisplayRecorder"
+            )
+
+            main_record_thread.start()
+
+            aa_record_thread = None
+
+            if display_id:
+                aa_record_thread = threading.Thread(
+                    target=record_android_auto,
+                    daemon=True,
+                    name="AndroidAutoDisplayRecorder"
+                )
+
+                aa_record_thread.start()
+
+            else:
+                logging.warning(
+                    "[ANDROID AUTO] "
+                    "Display ID를 찾지 못해 "
+                    "Android Auto 녹화를 건너뜁니다."
+                )
+
+            # -------------------------------------------------
+            # 녹화 시간 대기
+            # -------------------------------------------------
+
+            time.sleep(duration)
+
+            # -------------------------------------------------
+            # 두 녹화 프로세스 종료
+            # SIGINT를 보내 MP4 파일을 정상 마무리
+            # -------------------------------------------------
+
+            logging.info(
+                f"[{device_obj_serial}] "
+                "모든 화면 녹화 종료 중..."
+            )
+
+            self.device_obj.shell(
+                "pkill -2 screenrecord"
+            )
+
+            # screenrecord shell 명령이 종료될 때까지 잠시 대기
+            main_record_thread.join(timeout=5)
+
+            if aa_record_thread:
+                aa_record_thread.join(timeout=5)
+
+            # MP4 헤더 및 인덱스 저장 대기
+            time.sleep(2)
+
+            # -------------------------------------------------
+            # 기본 화면 영상 Pull
+            # -------------------------------------------------
+
+            logging.info(
+                f"[{device_obj_serial}] "
+                f"기본 화면 영상 Pull: {local_path}"
+            )
+
+            try:
+                self.device_obj.pull(
+                    remote_path,
+                    local_path
+                )
+
+                if os.path.exists(local_path):
+                    logging.info(
+                        f"[{device_obj_serial}] "
+                        f"기본 화면 영상 저장 완료: {local_path}"
+                    )
+                else:
+                    logging.error(
+                        f"[{device_obj_serial}] "
+                        "기본 화면 영상 Pull 실패"
+                    )
+
+            except Exception as pull_error:
+                logging.error(
+                    f"[{device_obj_serial}] "
+                    f"기본 화면 영상 Pull 오류: {pull_error}"
+                )
+
+            # -------------------------------------------------
+            # Android Auto 영상 Pull
+            # -------------------------------------------------
+
+            if display_id:
+                logging.info(
+                    "[ANDROID AUTO] "
+                    f"영상 Pull: {local_path_aa}"
+                )
+
+                try:
+                    self.device_obj.pull(
+                        remote_path_aa,
+                        local_path_aa
+                    )
+
+                    if os.path.exists(local_path_aa):
+                        logging.info(
+                            "[ANDROID AUTO] "
+                            f"영상 저장 완료: {local_path_aa}"
+                        )
+                    else:
+                        logging.error(
+                            "[ANDROID AUTO] "
+                            "영상 Pull 실패"
+                        )
+
+                except Exception as pull_error:
+                    logging.error(
+                        "[ANDROID AUTO] "
+                        f"영상 Pull 오류: {pull_error}"
+                    )
+
+            for error in recording_errors:
+                logging.error(error)
+
+        except Exception as e:
+            logging.error(
+                f"[{device_obj_serial}] "
+                f"비디오 태스크 에러: {e}"
+            )
+
+        finally:
+            logging.info(
+                f"[{device_obj_serial}] "
+                "비디오 작업 완료"
+            )
+
+    def record_video_old(
+        self,
+        duration=None,
+        save_dir=None,
+        loca_log=True
+    ):
+        """
         비디오 녹화 및 위치 정보 캡처 수행
         """
 

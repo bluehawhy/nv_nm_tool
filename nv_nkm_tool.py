@@ -13,7 +13,7 @@ from src.core import (
     func_device,
     call_device,  
     func_logging,
-    func_record_image,
+    func_record,
 )
 from src.automation import(
     scroll_map_and_screenshot
@@ -76,16 +76,14 @@ for item in reversed(revision_list):
 
 # 2. 찾은 버전을 툴 이름 뒤에 붙여줍니다.
 version = f'nkm Tool {last_v}'
-import re
-
-
 
 def debug_mode():
     # call_device.start_adb_server()
     devices = call_device.discover_and_connect_device()
     device = devices[0]
-    a = func_device.NaviController(device=device).activate_eng()
-    logging.info(a)
+    log_manager = func_logging.AndroidLogManager(device=device)    
+    record_manager =func_record.AndroidRecordManager(device=device,log_manager=log_manager)
+    record_manager.record_video(duration=10)
 
     
 def prod_mode():
@@ -98,6 +96,6 @@ def prod_mode():
 
 if __name__ == '__main__':
     loggas.set_debug_logging(True)
-    #debug_mode()
-    prod_mode()
+    debug_mode()
+    #prod_mode()
     

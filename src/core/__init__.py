@@ -8,7 +8,7 @@ Core Module
 from .func_device import *
 from .call_device import *
 from .func_ios import *
-from .func_record_image import *
+from .func_record import *
 from .func_image_search import *
 from .func_logging import *
 from .location_utils import *

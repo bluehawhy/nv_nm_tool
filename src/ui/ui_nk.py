@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 from ..core import func_logging
 from ..core import call_device
 
-from ..core import func_device, func_record_image
+from ..core import func_device, func_record
 from ..utils import configus, loggas
 logging = loggas.logger
 
@@ -620,7 +620,7 @@ class MainWindow(QMainWindow):
         self.and_log_manager = func_logging.AndroidLogManager(device=self.device)
 
         # AndroidRecordManager 객체 선언 및 검색 스레드 실행
-        self.aa_manager = func_record_image.AndroidRecordManager(device=self.device,log_manager=self.and_log_manager)
+        self.aa_manager = func_record.AndroidRecordManager(device=self.device,log_manager=self.and_log_manager)
         self.aa_manager.start()
 
         # LogManager에게 같은 인스턴스 전달

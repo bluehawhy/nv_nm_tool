@@ -10,7 +10,7 @@ from src.core import (
     call_device,
     func_device,
     func_logging,
-    func_record_image,
+    func_record,
 )
 
 logging = loggas.logger

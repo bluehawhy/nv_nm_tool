@@ -18,7 +18,7 @@
 	},
 	"version_filter": {
 		"sw_version": "[VT]\\d{3}\\.\\d{2}_\\d{6}",
-		"map_version": "(?i)(?:versionid|ndsversion)[:\\(\\s]*(\\d{5})"
+		"map_version": "(?i)(?:versionid|ndsversion)[:\\(\\s]*(\\d{5,9})"
 	},
 	"activated_eng_mode": {
 		"Android": "mod@!2026Gnik",
