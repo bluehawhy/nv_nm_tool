@@ -8,15 +8,17 @@ from src.utils import loggas
 # 2. 핵심 로직 및 디바이스 제어 모듈 (core)
 from src.core import (
     call_device,
-    func_device,
     func_logging,
     func_record,
 )
+
+from src.automation._sub import mapview_function
 
 logging = loggas.logger
 
 
 def start_simualtion(device: dict = None, file_path: str = None, colunm_loca_head: str = '좌표값', target_model: str = 'SM-X820'):
+    logging.info(f"📄 Excel 파일 경로 확인 완료: {file_path}")
     # ---------------------------------------------------------
     # 1. Excel 파일 경로 검증 및 저장 폴더 생성
     # ---------------------------------------------------------
@@ -40,8 +42,10 @@ def start_simualtion(device: dict = None, file_path: str = None, colunm_loca_hea
         logging.error(f"❌ '{target_model}' 모델 디바이스를 찾을 수 없습니다.")
         return -1
 
+    logging.info(f"🔌 디바이스 연결 완료: {device.get('model')} (ID: {device.get('id')})")
     logmanager = func_logging.AndroidLogManager(device=device)
-    navi_contrl = func_device.NaviController(device=device)
+
+    and_record_mgr = func_record.AndroidRecordManager(device=device, log_manager=logmanager)
 
     logmanager.start_live_logging()
     logging.info('로그 수신을 위해 10초간 대기합니다.')
@@ -115,13 +119,11 @@ def start_simualtion(device: dict = None, file_path: str = None, colunm_loca_hea
 
         # 지도 이동 및 스크린샷 촬영
         try:
-            scroll_result = navi_contrl.scroll_map_to_location(logmanager, target_location, max_attempts=100)
+            scroll_result = mapview_function.scroll_map_to_location(device = device, logmanager = logmanager, target_location = target_location, max_attempts=100)
             
             if scroll_result:
                 time.sleep(2)
-                screenshot_path = func_record.record_screenshot(
-                    device=device, 
-                    log_manager=logmanager, 
+                screenshot_path = and_record_mgr.record_screenshot(
                     save_dir=save_dir
                 )
                 df.at[index, 'screenshot_path'] = screenshot_path
@@ -143,3 +145,4 @@ def start_simualtion(device: dict = None, file_path: str = None, colunm_loca_hea
     df.to_excel(file_path, index=False)
     logging.info(f"✅ 모든 작업 완료! 최종 Excel 저장 완료 (총 {processed_count}건 신규 처리): {file_path}")
     return 0
+

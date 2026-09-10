@@ -15,9 +15,6 @@ from src.core import (
     func_logging,
     func_record,
 )
-from src.automation import(
-    scroll_map_and_screenshot
-)
 
 # 3. UI 메인 윈도우 모듈 (ui)
 from src.ui import ui_nk  # (기존 ui_nk)
@@ -64,7 +61,9 @@ revision_list=[
     'v0.83 (2026-08-27) : logic change due to change of UI menu, add fucntion for andriod auto',
     'v0.831 (2026-08-28) : fix current location convert logic',
     'v0.832 (2026-09-07) : carposition logic change, version check logic change',
-    'v0.84 (2026-09-08) : android auto video record function add',
+    'v0.84 (2026-09-09) : android auto video record function add, video record time setable in UI',
+    'v0.841 (2026-09-10) : bug fix - screenshot file name.',
+    'v0.842 (2026-09-10) : scroll butter logic change',
     ]
 
 

@@ -7,14 +7,14 @@
 	"log_filter": [
 		"[TTSCtrl] Sentence",
 		"onLLNViewModeChanged {\"isLLNViewMode\":false",
-		"Cmdline: navis.ncn.navi",
-		"RouteSetting(routeMode"
+		"_Cmdline: navis.ncn.navi",
+		"_RouteSetting(routeMode"
 	],
 	"log_screenshot_filter": {
 		"LLN_off": "onLLNViewModeChanged",
 		"maneuver_action": "Sentence\\(text : (now|잠시 후)",
 		"onLanesInfoChanged": "onLanesInfoChanged",
-		"crash":"Cmdline: navis.ncn.navi"
+		"crash":"_Cmdline: navis.ncn.navi"
 	},
 	"version_filter": {
 		"sw_version": "[VT]\\d{3}\\.\\d{2}_\\d{6}",

@@ -150,7 +150,7 @@ class AndroidLogManager:
         except Exception:
             self.overlap_lines = []
 
-    def start_live_logging(self, debounce_time=3.0):
+    def start_live_logging(self, debounce_time=1.0):
         self._expand_log_buffer()
         self._update_paths()
 

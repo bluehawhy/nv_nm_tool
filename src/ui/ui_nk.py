@@ -98,7 +98,15 @@ class AndroidWidget(QWidget):
         layout.addWidget(main_cmd_label)
         
         self.main_window.add_btn(layout, "Take Screenshot", self.main_window.cmd_tk_screenshot)
-        self.main_window.dynamic_btn = self.main_window.add_btn(layout, "Take video", self.main_window.cmd_rec_video)
+        video_layout = QHBoxLayout()
+        self.main_window.dynamic_btn = self.main_window.add_btn(video_layout, "Take video", self.main_window.cmd_rec_video)
+        self.main_window.video_duration_input = QLineEdit()
+        self.main_window.video_duration_input.setFixedWidth(30)
+        self.main_window.video_duration_input.setPlaceholderText("sec")
+        self.main_window.video_duration_input.setToolTip("녹화 시간(초): 정수가 아니면 기본값 사용")
+        video_layout.addWidget(self.main_window.video_duration_input)
+        video_layout.addWidget(QLabel("sec"))
+        layout.addLayout(video_layout)
         self.main_window.lock_buttons.append(self.main_window.add_btn(layout, "Activate ENG", self.main_window.cmd_activate_eng))
         self.main_window.lock_buttons.append(self.main_window.add_btn(layout, "Engineer Mode", self.main_window.cmd_gotoeng))
         self.main_window.lock_buttons.append(self.main_window.add_btn(layout, "Set MV Debug", self.main_window.cmd_set_mv_debug))
@@ -286,6 +294,10 @@ class MainWindow(QMainWindow):
         logging.info(f"[Check Point 2] 스타일 로드 및 UI 로드: {time.time() - t1:.3f}s")
         t2 = time.time()
         self.current_config = check_local_path()
+        video_duration = self.current_config.get('video_recording_duration')
+        self.video_duration_input.setText(
+            str(video_duration) if video_duration is not None else ""
+        )
         
         # 기타 설정
         self.stdout_receiver = StreamToLogger()
@@ -968,7 +980,14 @@ class MainWindow(QMainWindow):
     # 각 버튼 액션들
     def cmd_gotoeng(self): self.run_task(self.nav_ctrl_manager.go_to_eng_mode, )
     def cmd_activate_eng(self): self.run_task(self.nav_ctrl_manager.activate_eng,)
-    def cmd_rec_video(self): self.run_task(self.aa_manager.record_video,)
+    def cmd_rec_video(self):
+        duration_text = self.video_duration_input.text().strip()
+        try:
+            duration = int(duration_text)
+        except ValueError:
+            duration = None
+        self.run_task(self.aa_manager.record_video, duration)
+
     def cmd_tk_screenshot(self): self.run_task(self.aa_manager.record_screenshot,)
     def cmd_demo_on(self): self.run_task(self.nav_ctrl_manager.set_demo_mode, "START")
     def cmd_demo_stop(self): self.run_task(self.nav_ctrl_manager.set_demo_mode, "STOP")

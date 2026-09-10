@@ -396,11 +396,7 @@ class AndroidRecordManager:
     # Screenshot
     # =========================================================
 
-    def record_screenshot(
-        self,
-        loca_log=True,
-        save_dir=None
-    ):
+    def record_screenshot(self,loca_log=True,save_dir=None):
         """
         스크린샷 캡처
 
@@ -412,44 +408,17 @@ class AndroidRecordManager:
         - Android Auto 화면도 추가 캡처
         """
 
-        timestamp = datetime.now().strftime(
-            "%Y%m%d_%H%M%S_%f"
-        )
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        logging.info(timestamp)
 
-        screenshot_file = (
-            f"Screenshot_{timestamp}.png"
-        )
-
-        screenshot_file_aa = (
-            f"Screenshot_{timestamp}_android_auto.png"
-        )
-
-        car_pos_file = (
-            f"Screenshot_{timestamp}_location.txt"
-        )
-
-        local_dir = (
-            save_dir
-            if save_dir
-            else self.config['local_path']
-        )
-
+        screenshot_file = (f"Screenshot_{timestamp}.png")
+        screenshot_file_aa = (f"Screenshot_{timestamp}_android_auto.png")
+        car_pos_file = (f"Screenshot_{timestamp}_location.txt")
+        local_dir = (save_dir if save_dir else self.config['local_path'])
         os.makedirs(local_dir, exist_ok=True)
-
-        screenshot_path = os.path.join(
-            local_dir,
-            screenshot_file
-        )
-
-        screenshot_path_aa = os.path.join(
-            local_dir,
-            screenshot_file_aa
-        )
-
-        car_pos_path = os.path.join(
-            local_dir,
-            car_pos_file
-        )
+        screenshot_path = os.path.join(local_dir,screenshot_file)
+        screenshot_path_aa = os.path.join(local_dir,screenshot_file_aa)
+        car_pos_path = os.path.join(local_dir,car_pos_file)
 
         # -----------------------------------------------------
         # 위치 정보 저장 (공통 내장 함수 호출)
@@ -464,10 +433,7 @@ class AndroidRecordManager:
         # 기본 Android 화면 캡처
         # -----------------------------------------------------
 
-        logging.info(
-            f"Starting screenshot: "
-            f"{screenshot_file}"
-        )
+        logging.info(f"Starting screenshot: "f"{screenshot_file}")
 
         try:
 
@@ -475,32 +441,18 @@ class AndroidRecordManager:
 
             result = self.device_obj.screencap()
 
-            with open(
-                screenshot_path,
-                "wb"
-            ) as f:
-
+            with open(screenshot_path,"wb") as f:
                 f.write(result)
 
-            elapsed = (
-                time.perf_counter() - start
-            )
+            elapsed = (time.perf_counter() - start)
 
-            logging.info(
-                "[SCREENCAP DONE] "
-                f"elapsed={elapsed:.3f}s"
-            )
+            logging.info("[SCREENCAP DONE] "f"elapsed={elapsed:.3f}s")
 
-            logging.info(
-                f"Screenshot saved successfully: "
-                f"{screenshot_path}"
-            )
+            logging.info(f"Screenshot saved successfully: "f"{screenshot_path}")
 
         except Exception as e:
 
-            logging.error(
-                f"Failed to take screenshot: {e}"
-            )
+            logging.error(f"Failed to take screenshot: {e}")
 
         # -----------------------------------------------------
         # Android Auto 화면 캡처
@@ -803,7 +755,9 @@ class AndroidRecordManager:
             raise ValueError("duration과 android_auto_fps는 유한한 양수여야 합니다.")
 
         device_obj_serial = self.device_obj.serial
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        now = datetime.now()
+        timestamp = now.strftime("%Y%m%d_%H%M%S")       # 최종 파일명
+        temp_timestamp = now.strftime("%Y%m%d_%H%M%S_%f")  # 임시 폴더
         local_dir = save_dir if save_dir else self.config['local_path']
         os.makedirs(local_dir, exist_ok=True)
 
@@ -815,7 +769,7 @@ class AndroidRecordManager:
         remote_video_dir = ("/sdcard"if res == '1920x720' else "/sdcard/DCIM/Screenshots")
 
         remote_video_path = f"{remote_video_dir}/{video_file}"
-        remote_frame_dir = f"/sdcard/aa_video_frames_{timestamp}"
+        remote_frame_dir = f"/sdcard/aa_video_frames_{temp_timestamp}"
         local_video_path = os.path.join(local_dir, video_file)
         local_aa_video_path = os.path.join(local_dir, aa_video_file)
         car_pos_path = os.path.join(local_dir, car_pos_file)
@@ -825,7 +779,7 @@ class AndroidRecordManager:
 
         local_temp_root = os.path.join(
             aa_temp_dir,
-            timestamp
+            temp_timestamp
         )
         local_frame_dir = local_temp_root
 
