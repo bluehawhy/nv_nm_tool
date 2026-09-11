@@ -68,16 +68,19 @@ def set_north_up(device, logmanager):
 
     current_heading = parse_map_heading(current_log)
 
-    if current_heading is None:
-        logging.error("지도 방향 정보를 가져올 수 없습니다.")
-        return False
-
-    if abs(current_heading) > 5.0:  # 5도 이상 차이가 나면 북쪽으로 회전
-        logging.info(f"지도 방향({current_heading}°)이 북쪽과 다릅니다. 북쪽으로 회전합니다.")
-        navi_contrl.set_north_up()
-        time.sleep(1)  # 회전 후 잠시 대기
+    if current_heading == "north_up":
+        logging.info("지도 방향이 이미 북쪽으로 설정되어 있습니다.")
+        return True
     else:
-        logging.info(f"지도 방향({current_heading}°)이 이미 북쪽과 거의 일치합니다.")
+        logging.info("지도 방향을 북쪽으로 설정합니다.")
+        navi_contrl.set_map_north_up()
+        time.sleep(1)  # 설정 후 잠시 대기
+        new_heading = parse_map_heading(logmanager)
+        if new_heading == "north_up":
+            logging.info("지도 방향이 성공적으로 북쪽으로 설정되었습니다.")
+            return True
+        else:
+            logging.warning("지도 방향 설정에 실패했습니다.")
 
     return True
 

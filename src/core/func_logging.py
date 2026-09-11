@@ -150,15 +150,17 @@ class AndroidLogManager:
         except Exception:
             self.overlap_lines = []
 
-    def start_live_logging(self, debounce_time=1.0):
+    def start_live_logging(self, debounce_time=1.0, enable_filters =True):
+        self.enable_filters = enable_filters
+
         self._expand_log_buffer()
         self._update_paths()
 
         self.stop_event = threading.Event()
         log_thread = threading.Thread(
-            target=self._live_log_worker, 
-            args=(debounce_time,), 
-            daemon=True
+            target=self._live_log_worker,
+            args=(debounce_time,),
+            daemon=True,
         )
         log_thread.start()
 
@@ -211,10 +213,13 @@ class AndroidLogManager:
             )
 
     def _live_log_stream_handler(self, connection, debounce_time):
+        enable_filters = getattr(self, "enable_filters", True)
+
         is_snapshot_enabled = self.config.get('snapshop_log', False)
         filter_keywords = self.config.get('log_filter', [])
         is_filter_active = (
-            is_snapshot_enabled
+            enable_filters
+            and is_snapshot_enabled
             and isinstance(filter_keywords, list)
             and len(filter_keywords) > 0
         )
@@ -291,7 +296,7 @@ class AndroidLogManager:
                                 f_filter.write(line)
 
                         # 5. 스크린샷 트리거
-                        if self.sfm.is_active:
+                        if enable_filters and self.sfm.is_active:
                             for folder_name in self.sfm.match(clean_line):
 
                                 current_time = time.time()
