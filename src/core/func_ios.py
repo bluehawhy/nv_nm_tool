@@ -18,7 +18,18 @@ from pymobiledevice3.remote.core_device.device_info import DeviceInfoService
 from pymobiledevice3.remote.core_device.screen_capture_service import (
     ScreenCaptureService,
 )
-from pymobiledevice3.remote.userspace_tunnel import UserspaceRsdTunnel
+from pymobiledevice3.tunneld.api import (
+    get_tunneld_device_by_udid,
+    get_tunneld_devices,
+)
+
+try:
+    from pymobiledevice3.remote.userspace_tunnel import UserspaceRsdTunnel
+    USERSPACE_TUNNEL_IMPORT_ERROR = None
+except Exception as e:
+    # PyInstaller 빌드에서 wintun.dll이 누락돼도 앱 전체가 종료되지 않게 합니다.
+    UserspaceRsdTunnel = None
+    USERSPACE_TUNNEL_IMPORT_ERROR = e
 
 from src.utils import loggas, configus
 
@@ -428,14 +439,14 @@ class IOSDeviceController:
         except Exception as e:
             print(
                 "⚠️ iOS 스크린샷 촬영 불가: "
-                "기기 연결 상태를 확인해 주세요."
+                "기기 또는 터널 연결 상태를 확인해 주세요."
             )
             logging.debug(f"iOS 스크린샷 촬영 실패: {e}", exc_info=True)
             return None
 
 
     async def _get_ios_screenshot_async(self):
-        """내장 userspace 터널과 CoreDevice API로 화면을 캡처합니다."""
+        """내장 터널을 우선 사용하고 실행 중인 tunneld로 폴백합니다."""
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -447,12 +458,7 @@ class IOSDeviceController:
             None,
         )
 
-        # Windows에서는 별도 tunneld 콘솔 없이 프로세스 내부 userspace
-        # 터널을 생성하고, 작업이 끝나면 자동으로 정리합니다.
-        async with UserspaceRsdTunnel(
-            serial=serial,
-            autopair=True,
-        ) as rsd:
+        async def capture_with_rsd(rsd):
             carplay_unique_id = None
 
             try:
@@ -550,3 +556,46 @@ class IOSDeviceController:
             if carplay_path in capture_results:
                 return carplay_path
             return None
+
+        # wintun.dll이 정상 포함된 빌드는 별도 콘솔 없이 내장 터널을 사용합니다.
+        if UserspaceRsdTunnel is not None:
+            try:
+                async with UserspaceRsdTunnel(
+                    serial=serial,
+                    autopair=True,
+                ) as rsd:
+                    return await capture_with_rsd(rsd)
+            except Exception as e:
+                logging.debug(
+                    f"내장 userspace 터널 연결 실패: {e}",
+                    exc_info=True,
+                )
+        elif USERSPACE_TUNNEL_IMPORT_ERROR is not None:
+            logging.debug(
+                "내장 userspace 터널 로드 실패: "
+                f"{USERSPACE_TUNNEL_IMPORT_ERROR}"
+            )
+
+        # 내장 터널을 사용할 수 없으면 이미 실행 중인 tunneld를 재사용합니다.
+        rsd = None
+        try:
+            if serial:
+                rsd = await get_tunneld_device_by_udid(serial)
+            else:
+                rsd_devices = await get_tunneld_devices()
+                if rsd_devices:
+                    rsd = rsd_devices[0]
+                    for unused_rsd in rsd_devices[1:]:
+                        await unused_rsd.close()
+
+            if rsd is None:
+                print(
+                    "ℹ️ 내장 터널과 실행 중인 tunneld 연결을 "
+                    "모두 찾을 수 없습니다."
+                )
+                return None
+
+            return await capture_with_rsd(rsd)
+        finally:
+            if rsd is not None:
+                await rsd.close()
