@@ -1,4 +1,5 @@
 import os
+import logging as std_logging
 import asyncio
 import time
 import shutil
@@ -174,10 +175,17 @@ class IOSDeviceController:
         async with await create_using_usbmux(serial=serial) as lockdown:
             async with CrashReportsManager(lockdown) as crash_manager:
                 print("📥 장치에서 전체 로그 데이터를 수집하는 중...")
-                await crash_manager.pull(
-                    str(temp_path),
-                    progress_bar=False,
-                )
+
+                # pull() 내부의 파일별 전송 INFO 로그만 작업 중 임시로 숨깁니다.
+                previous_level = crash_manager.logger.level
+                crash_manager.logger.setLevel(std_logging.WARNING)
+                try:
+                    await crash_manager.pull(
+                        str(temp_path),
+                        progress_bar=False,
+                    )
+                finally:
+                    crash_manager.logger.setLevel(previous_level)
 
 
     def download_filtered_logs(
