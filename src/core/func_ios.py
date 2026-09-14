@@ -463,11 +463,11 @@ class IOSDeviceController:
         from hachoir.metadata import extractMetadata
         from hachoir.parser import createParser
 
-        parser = createParser(str(local_path))
-        if parser is None:
-            return None
-
         try:
+            parser = createParser(str(local_path))
+            if parser is None:
+                return None
+
             with parser:
                 metadata = extractMetadata(parser, quality=1.0)
         except Exception as e:
