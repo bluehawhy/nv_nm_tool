@@ -18,6 +18,19 @@ from src.utils import loggas, configus
 
 logging = loggas.logger
 
+IOS_PHOTO_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".heic",
+    ".heif",
+    ".dng",
+    ".gif",
+    ".tif",
+    ".tiff",
+    ".webp",
+}
+
 
 class IOSDeviceController:
     """
@@ -204,12 +217,12 @@ class IOSDeviceController:
             print(f"❌ 필터 로그 다운로드 중 오류 발생: {e}")
 
     def download_photos_by_date(self, set_date_str=None, target_ext=None):
-        """특정 수정 일자 및 특정 확장자(.JPG, .PNG 등)를 기준으로 사진을 필터링하여 다운로드합니다."""
+        """특정 날짜의 사진을 다운로드합니다. target_ext가 없으면 모든 사진 확장자를 대상으로 합니다."""
         try:
             asyncio.run(
                 self._download_photos_by_date_async(
                     set_date_str=set_date_str,
-                    target_ext=target_ext,
+                    target_ext=normalized_target_ext,
                 )
             )
         except Exception as e:
@@ -222,7 +235,17 @@ class IOSDeviceController:
         save_dir = self.base_dir / "IOS" / folder_suffix / "ios_pic"
         save_dir.mkdir(parents=True, exist_ok=True)
 
-        print(f"🚀 사진 필터링 다운로드 시작 (날짜: {set_date_str}, 확장자: {target_ext})")
+        normalized_target_ext = None
+        if target_ext:
+            normalized_target_ext = str(target_ext).strip().lower()
+            if not normalized_target_ext.startswith("."):
+                normalized_target_ext = f".{normalized_target_ext}"
+
+        extension_label = normalized_target_ext or "전체 사진"
+        print(
+            f"🚀 사진 필터링 다운로드 시작 "
+            f"(날짜: {set_date_str}, 확장자: {extension_label})"
+        )
 
         # 기존 lockdown은 장치 검색용 asyncio.run()에서 생성되었으므로,
         # 현재 작업의 이벤트 루프에서 같은 장치로 새 세션을 엽니다.
@@ -262,7 +285,12 @@ class IOSDeviceController:
             ]
 
             for photo_name in photos:
-                if target_ext and not photo_name.upper().endswith(target_ext.upper()):
+                photo_ext = Path(photo_name).suffix.lower()
+
+                if target_ext:
+                    if photo_ext != target_ext:
+                        continue
+                elif photo_ext not in IOS_PHOTO_EXTENSIONS:
                     continue
 
                 remote_path = f"{remote_sub_path}/{photo_name}"
