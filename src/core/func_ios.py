@@ -485,8 +485,11 @@ class IOSDeviceController:
         async def capture_primary_with_lockdown():
             """RSD 캡처 실패 시 USB lockdown screenshotr 서비스로 재시도합니다."""
             try:
-                async with ScreenshotService(self.lockdown) as screenshot_service:
-                    image_data = await screenshot_service.take_screenshot()
+                # 장치 검색 단계에서 만든 lockdown 객체는 이전 이벤트 루프에
+                # 연결돼 있으므로 현재 루프에서 같은 UDID의 세션을 새로 엽니다.
+                async with await create_using_usbmux(serial=serial) as lockdown:
+                    async with ScreenshotService(lockdown) as screenshot_service:
+                        image_data = await screenshot_service.take_screenshot()
 
                 if not image_data:
                     raise ValueError("스크린샷 이미지 데이터가 없습니다.")
