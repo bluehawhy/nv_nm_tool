@@ -91,14 +91,10 @@ def debug_mode():
     # call_device.start_adb_server()
     devices = call_device.discover_and_connect_device()
     device = devices[0]
-    ios_controller = func_ios.IOSDeviceController(device)
-    #ios_controller.get_ios_screenshot()
-    ios_controller.get_crash_logs("2026-09-14")
-    ios_controller.download_filtered_logs("2026-09-14")
 
 
 if __name__ == '__main__':
     loggas.set_debug_logging(True)
-    debug_mode()
-    #prod_mode()
+    #debug_mode()
+    prod_mode()
     

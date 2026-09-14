@@ -764,17 +764,7 @@ class MainWindow(QMainWindow):
             self.and_log_manager.set_record_manager(self.aa_manager)
 
         elif dev_type_str == "Apple":
-            lockdown_device = self.device.get("lockdown_device")
-
-            if lockdown_device is None:
-                self.log("[Error] Apple lockdown_device가 없습니다.")
-                self.device = None
-                return
-
-            self.ios_device_controller = func_ios.IOSDeviceController(
-                lockdown_device=lockdown_device,
-                folder_path=self.current_config["local_path"]
-            )
+            self.ios_device_controller = func_ios.IOSDeviceController(self.device)
         
 
         #기존 UI 요소 비활성화 및 상태 업데이트
