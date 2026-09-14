@@ -18,7 +18,7 @@ from pymobiledevice3.remote.core_device.device_info import DeviceInfoService
 from pymobiledevice3.remote.core_device.screen_capture_service import (
     ScreenCaptureService,
 )
-from pymobiledevice3.remote.rsd_tunnel import PreferredRsdTunnel
+from pymobiledevice3.remote.userspace_tunnel import UserspaceRsdTunnel
 
 from src.utils import loggas, configus
 
@@ -449,9 +449,9 @@ class IOSDeviceController:
 
         # Windows에서는 별도 tunneld 콘솔 없이 프로세스 내부 userspace
         # 터널을 생성하고, 작업이 끝나면 자동으로 정리합니다.
-        async with PreferredRsdTunnel(
+        async with UserspaceRsdTunnel(
             serial=serial,
-            prefer_native=False,
+            autopair=True,
         ) as rsd:
             carplay_unique_id = None
 
