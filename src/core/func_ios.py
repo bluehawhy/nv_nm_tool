@@ -544,8 +544,8 @@ class IOSDeviceController:
 
                 if success:
                     print(
-                        f"✅ {display_name} 스크린샷 저장 완료: "
-                        f"{output_path} ({output_path.stat().st_size} bytes)"
+                        f"{display_name} 스크린샷 저장 완료: "
+                        f"{output_path}"
                     )
                     continue
 
