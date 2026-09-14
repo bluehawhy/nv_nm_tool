@@ -5,9 +5,6 @@ import asyncio
 import time
 import shutil
 import tempfile
-import subprocess
-import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -17,6 +14,14 @@ from pymobiledevice3.services.afc import AfcService
 from pymobiledevice3.services.crash_reports import CrashReportsManager
 from pymobiledevice3.services.house_arrest import HouseArrestService
 from pymobiledevice3.services.installation_proxy import InstallationProxyService
+from pymobiledevice3.remote.core_device.device_info import DeviceInfoService
+from pymobiledevice3.remote.core_device.screen_capture_service import (
+    ScreenCaptureService,
+)
+from pymobiledevice3.tunneld.api import (
+    get_tunneld_device_by_udid,
+    get_tunneld_devices,
+)
 
 from src.utils import loggas, configus
 
@@ -420,42 +425,56 @@ class IOSDeviceController:
 
 
     def get_ios_screenshot(self):
-        """iPhone 화면과 연결된 CarPlay 화면을 가능한 한 동시에 캡처합니다."""
+        """내부 API로 iPhone과 CarPlay 화면을 가능한 한 동시에 캡처합니다."""
+        try:
+            return asyncio.run(self._get_ios_screenshot_async())
+        except Exception as e:
+            print(
+                "⚠️ iOS 스크린샷 촬영 불가: "
+                "기기 연결과 tunneld 실행 상태를 확인해 주세요."
+            )
+            logging.debug(f"iOS 스크린샷 촬영 실패: {e}", exc_info=True)
+            return None
+
+
+    async def _get_ios_screenshot_async(self):
+        """실행 파일 호출 없이 pymobiledevice3 내부 API로 화면을 캡처합니다."""
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         save_path = self.base_dir / f"Screenshot_{timestamp}.png"
         carplay_path = self.base_dir / f"Screenshot_{timestamp}_carplay.png"
+        serial = self.device.get("serial") or getattr(
+            self.lockdown,
+            "identifier",
+            None,
+        )
 
-        pymobiledevice_command = [sys.executable, "-m", "pymobiledevice3"]
-
-        phone_command = [
-            *pymobiledevice_command,
-            "developer",
-            "dvt",
-            "screenshot",
-            str(save_path),
-        ]
-        carplay_command = None
-
-        # display ID와 uniqueId는 연결마다 달라질 수 있으므로 촬영 전에 조회합니다.
+        rsd = None
         try:
-            display_result = subprocess.run(
-                [
-                    *pymobiledevice_command,
-                    "developer",
-                    "core-device",
-                    "get-display-info",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=45,
-            )
+            if serial:
+                rsd = await get_tunneld_device_by_udid(serial)
+            else:
+                rsd_devices = await get_tunneld_devices()
+                if rsd_devices:
+                    rsd = rsd_devices[0]
+                    for unused_rsd in rsd_devices[1:]:
+                        await unused_rsd.close()
 
-            if display_result.returncode == 0:
-                display_info = json.loads(display_result.stdout)
+            if rsd is None:
+                print(
+                    "ℹ️ 활성 iOS 터널을 찾을 수 없어 "
+                    "스크린샷 촬영을 건너뜁니다."
+                )
+                return None
+
+            carplay_unique_id = None
+
+            try:
+                async with DeviceInfoService(rsd) as device_info_service:
+                    display_info = await device_info_service.get_display_info()
+
                 active_external_displays = []
-
                 for display in display_info.get("displays", []):
                     if not display.get("external"):
                         continue
@@ -475,7 +494,6 @@ class IOSDeviceController:
                         active_external_displays.append(display)
 
                 if active_external_displays:
-                    # CarPlay는 일반적으로 wireless 디스플레이로 노출됩니다.
                     active_external_displays.sort(
                         key=lambda display: (
                             not str(
@@ -488,80 +506,65 @@ class IOSDeviceController:
                     carplay_unique_id = carplay_display.get(
                         "uniqueId"
                     ) or carplay_display.get("displayUniqueID")
-                    carplay_command = [
-                        *pymobiledevice_command,
-                        "developer",
-                        "core-device",
-                        "screen-capture",
-                        "screenshot",
-                        str(carplay_path),
-                        "--display-unique-id",
-                        carplay_unique_id,
-                    ]
                 else:
-                    print("ℹ️ 활성 CarPlay 디스플레이가 없어 iPhone 화면만 촬영합니다.")
-            else:
-                print("ℹ️ CarPlay 디스플레이를 조회하지 못해 iPhone 화면만 촬영합니다.")
-                error_message = (
-                    display_result.stderr or display_result.stdout
-                ).strip()
-                if error_message:
-                    logging.debug(error_message)
-        except (OSError, subprocess.TimeoutExpired) as e:
-            print(f"⚠️ 외부 디스플레이 조회 실패: {e}")
-        except (TypeError, json.JSONDecodeError) as e:
-            print(f"⚠️ 디스플레이 정보 파싱 실패: {e}")
-
-        capture_jobs = {
-            "iPhone": (phone_command, save_path),
-        }
-        if carplay_command:
-            capture_jobs["CarPlay"] = (carplay_command, carplay_path)
-
-        def capture_screen(command, output_path):
-            try:
-                result = subprocess.run(
-                    command,
-                    capture_output=True,
-                    text=True,
-                    timeout=45,
-                )
-                return result, result.returncode == 0 and output_path.exists()
-            except (OSError, subprocess.TimeoutExpired) as e:
-                return e, False
-
-        capture_success = {}
-        with ThreadPoolExecutor(max_workers=len(capture_jobs)) as executor:
-            futures = {
-                executor.submit(capture_screen, command, output_path): (
-                    display_name,
-                    output_path,
-                )
-                for display_name, (command, output_path) in capture_jobs.items()
-            }
-
-            for future in as_completed(futures):
-                display_name, output_path = futures[future]
-                result, success = future.result()
-                capture_success[display_name] = success
-
-                if success:
                     print(
-                        f"{display_name} 스크린샷 저장 완료: "
-                        f"{output_path}"
+                        "ℹ️ 활성 CarPlay 디스플레이가 없어 "
+                        "iPhone 화면만 촬영합니다."
                     )
-                    continue
+            except Exception as e:
+                print(
+                    "ℹ️ CarPlay 디스플레이를 조회하지 못해 "
+                    "iPhone 화면만 촬영합니다."
+                )
+                logging.debug(
+                    f"CarPlay 디스플레이 조회 실패: {e}",
+                    exc_info=True,
+                )
 
-                print(f"⚠️ {display_name} 스크린샷 촬영에 실패했습니다.")
-                if isinstance(result, Exception):
-                    print(result)
-                else:
-                    error_message = (result.stderr or result.stdout).strip()
-                    if error_message:
-                        logging.debug(error_message)
+            async def capture_screen(display_name, output_path, unique_id):
+                try:
+                    async with ScreenCaptureService(rsd) as capture_service:
+                        response = await capture_service.capture_screenshot(
+                            display_unique_id=unique_id
+                        )
 
-        if capture_success.get("iPhone"):
-            return save_path
-        if capture_success.get("CarPlay"):
-            return carplay_path
-        return None
+                    image_data = response.get("image")
+                    if not image_data:
+                        raise ValueError("스크린샷 이미지 데이터가 없습니다.")
+
+                    output_path.write_bytes(image_data)
+                    print(
+                        f"✅ {display_name} 스크린샷 저장 완료: "
+                        f"{output_path} ({output_path.stat().st_size} bytes)"
+                    )
+                    return output_path
+                except Exception as e:
+                    print(f"⚠️ {display_name} 스크린샷 촬영에 실패했습니다.")
+                    logging.debug(
+                        f"{display_name} 스크린샷 촬영 실패: {e}",
+                        exc_info=True,
+                    )
+                    return None
+
+            capture_tasks = [
+                capture_screen("iPhone", save_path, None),
+            ]
+            if carplay_unique_id:
+                capture_tasks.append(
+                    capture_screen(
+                        "CarPlay",
+                        carplay_path,
+                        carplay_unique_id,
+                    )
+                )
+
+            capture_results = await asyncio.gather(*capture_tasks)
+
+            if save_path in capture_results:
+                return save_path
+            if carplay_path in capture_results:
+                return carplay_path
+            return None
+        finally:
+            if rsd is not None:
+                await rsd.close()
