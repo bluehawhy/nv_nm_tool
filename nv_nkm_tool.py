@@ -78,14 +78,6 @@ for item in reversed(revision_list):
 # 2. 찾은 버전을 툴 이름 뒤에 붙여줍니다.
 version = f'nkm Tool {last_v}'
 
-def debug_mode():
-    # call_device.start_adb_server()
-    devices = call_device.discover_and_connect_device()
-    device = devices[0]
-    ios_controller = func_ios.IOSDeviceController(device)
-    #ios_controller.get_ios_screenshot()
-    ios_controller.download_photos_by_date("2026-09-14","jpg")
-
     
 def prod_mode():
     app = QApplication(sys.argv)
@@ -93,6 +85,15 @@ def prod_mode():
     ex.show()
     sys.exit(app.exec())
 
+
+
+def debug_mode():
+    # call_device.start_adb_server()
+    devices = call_device.discover_and_connect_device()
+    device = devices[0]
+    ios_controller = func_ios.IOSDeviceController(device)
+    #ios_controller.get_ios_screenshot()
+    ios_controller.download_photos_by_date("2026-09-14","jpg")
 
 
 if __name__ == '__main__':

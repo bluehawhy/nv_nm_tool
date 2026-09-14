@@ -23,24 +23,38 @@ class IOSDeviceController:
     iOS 기기의 앱 정보 검색, 크래시 로그 수집, 앱 샌드박스 파일 다운로드,
     사진 다운로드, 스크린샷 기능을 수행하는 클래스입니다.
     """
-    def __init__(self, lockdown_device, folder_path=None):
-        if not lockdown_device:
-            raise ValueError("유효한 lockdown_device(iOS 연결 세션) 객체가 필요합니다.")
+    def __init__(self, device, folder_path=None):
+        if not isinstance(device, dict):
+            raise ValueError("유효한 iOS 장치 딕셔너리가 필요합니다.")
+
+        lockdown_device = device.get("lockdown_device")
+
+        if lockdown_device is None:
+            raise ValueError(
+                "장치 정보에 lockdown_device가 없습니다."
+            )
+
+        self.device = device
         self.lockdown = lockdown_device
 
-        # [추가] 설정 파일 로드
-        try:
-            self.config = configus.load_config('resources/configs/config.json')
-        except Exception as e:
-            logging.warning(f"iOS 설정 파일 로드 실패: {e}")
-            # configus 모듈이 임포트되지 않았을 때를 위한 임시 가드 (실제 환경에 맞게 조정 가능)
-            self.config = {"local_path": str(Path.home() / "Desktop")}
-
-        # [추가] 기본 저장 및 로그 경로 설정
         if folder_path is None:
-            folder_path = self.config.get('local_path', './')
-        
+            try:
+                self.config = configus.load_config("resources/configs/config.json")
+            except Exception as e:
+                logging.warning(f"iOS 설정 파일 로드 실패: {e}")
+
+                self.config = {"local_path": str(Path.home() / "Desktop" / "NKM_Tool")}
+
+            folder_path = self.config.get("local_path",str(Path.home() / "Desktop" / "NKM_Tool"))
+        else:
+            # 외부에서 저장 경로를 직접 전달한 경우
+            self.config["local_path"] = str(folder_path)
+
+        # 기본 저장 경로
         self.base_dir = Path(folder_path)
+        self.base_dir.mkdir(parents=True, exist_ok=True)
+
+        # 로그 저장 경로
         self.log_dir = self.base_dir / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -238,6 +252,7 @@ class IOSDeviceController:
         except Exception as e:
             print(f"\n❌ 사진 다운로드 중 치명적 오류: {e}")
 
+
     def download_photos_by_date(self, set_date_str=None, target_ext=None):
         """특정 수정 일자 및 특정 확장자(.JPG, .PNG 등)를 기준으로 사진을 필터링하여 다운로드합니다."""
         folder_suffix = set_date_str if set_date_str else "filtered"
@@ -286,6 +301,9 @@ class IOSDeviceController:
 
         except Exception as e:
             print(f"\n❌ 사진 필터링 복사 중 오류 발생: {e}")
+
+
+
 
     def get_ios_screenshot(self):
         """터널 데몬 프로세스를 구동하여 안전하게 iOS 기기 스크린샷을 확보합니다."""
