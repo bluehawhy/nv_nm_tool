@@ -289,7 +289,7 @@ class IOSDeviceController:
 
     def get_ios_screenshot(self):
         """터널 데몬 프로세스를 구동하여 안전하게 iOS 기기 스크린샷을 확보합니다."""
-        current_dir = self.base_dir / "IOS" / "screenshot"
+        current_dir = self.base_dir
         current_dir.mkdir(parents=True, exist_ok=True)
         
         print("🚀 [1/3] 터널 프로세스 시작...")
