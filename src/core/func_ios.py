@@ -6,6 +6,7 @@ import time
 import shutil
 import tempfile
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -426,8 +427,10 @@ class IOSDeviceController:
         save_path = self.base_dir / f"Screenshot_{timestamp}.png"
         carplay_path = self.base_dir / f"Screenshot_{timestamp}_carplay.png"
 
+        pymobiledevice_command = [sys.executable, "-m", "pymobiledevice3"]
+
         phone_command = [
-            "pymobiledevice3",
+            *pymobiledevice_command,
             "developer",
             "dvt",
             "screenshot",
@@ -439,7 +442,7 @@ class IOSDeviceController:
         try:
             display_result = subprocess.run(
                 [
-                    "pymobiledevice3",
+                    *pymobiledevice_command,
                     "developer",
                     "core-device",
                     "get-display-info",
@@ -486,7 +489,7 @@ class IOSDeviceController:
                         "uniqueId"
                     ) or carplay_display.get("displayUniqueID")
                     carplay_command = [
-                        "pymobiledevice3",
+                        *pymobiledevice_command,
                         "developer",
                         "core-device",
                         "screen-capture",
