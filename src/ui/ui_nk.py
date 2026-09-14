@@ -15,10 +15,15 @@ from PyQt6.QtWidgets import (
 )
 
 # 사용자 정의 로컬 모듈 임포트
-from ..core import func_logging
-from ..core import call_device
 
-from ..core import func_device, func_record
+# 2. 핵심 로직 및 디바이스 제어 모듈 (core)
+from src.core import (
+    func_logging,
+    call_device,  
+    func_record,
+    func_ios,
+    func_device,
+)
 from ..utils import configus, loggas
 logging = loggas.logger
 
@@ -359,6 +364,7 @@ class MainWindow(QMainWindow):
         self.nav_ctrl_manager = None #NaviController 초기선언
         self.and_log_manager = None #AndroidLogManager 초기선언
         self.keyboard_manager = None #KeyboardController 초기선언
+        self.ios_device_controller = None #IOSDeviceController 초기선언
         self.aa_manager = None       #AndroidRecordManager 초기선언
         self.device_type = None
         self.current_config = None
@@ -695,6 +701,7 @@ class MainWindow(QMainWindow):
         self.and_log_manager = None  # [수정] None으로 초기화
         self.nav_ctrl_manager = None # [수정] None으로 초기화
         self.keyboard_manager = None # [수정] None으로 초기화
+        self.ios_device_controller = None # [수정] None으로 초기화
         if self.aa_manager is not None:
             self.aa_manager.stop() # 먼저 스레드 종료 후
         self.aa_manager = None #None으로 초기화
@@ -738,24 +745,36 @@ class MainWindow(QMainWindow):
         self.sw_version = "Checking..."
         self.map_version = "Checking..."
         self.refresh_display()
-        dev_type_str = self.device.get('detected_type', 'Device')
+        dev_type_str = self.device.get("detected_type", "Device")
 
-        # [수정] NaviController 객체 선언
-        self.nav_ctrl_manager = func_device.NaviController(device=self.device)
-        self.keyboard_manager = func_device.KeyboardController(device=self.device)
+        if dev_type_str in ("Android", "twd_adb"):
+            self.nav_ctrl_manager = func_device.NaviController(device=self.device)
+            self.keyboard_manager = func_device.KeyboardController(device=self.device)
 
-        # [수정] AndroidLogManager 객체 선언
-        self.and_log_manager = func_logging.AndroidLogManager(device=self.device)
+            self.and_log_manager = func_logging.AndroidLogManager(
+                device=self.device
+            )
 
-        # AndroidRecordManager 객체 선언 및 검색 스레드 실행
-        self.aa_manager = func_record.AndroidRecordManager(device=self.device,log_manager=self.and_log_manager)
-        self.aa_manager.start()
+            self.aa_manager = func_record.AndroidRecordManager(
+                device=self.device,
+                log_manager=self.and_log_manager
+            )
+            self.aa_manager.start()
 
-        # LogManager에게 같은 인스턴스 전달
-        self.and_log_manager.set_record_manager(
-            self.aa_manager
-        )
+            self.and_log_manager.set_record_manager(self.aa_manager)
 
+        elif dev_type_str == "Apple":
+            lockdown_device = self.device.get("lockdown_device")
+
+            if lockdown_device is None:
+                self.log("[Error] Apple lockdown_device가 없습니다.")
+                self.device = None
+                return
+
+            self.ios_device_controller = func_ios.IOSDeviceController(
+                lockdown_device=lockdown_device,
+                folder_path=self.current_config["local_path"]
+            )
         
 
         #기존 UI 요소 비활성화 및 상태 업데이트
@@ -1174,17 +1193,71 @@ class MainWindow(QMainWindow):
 
     #apple device 관련 버튼 액션
     def cmd_apple_screenshot(self):
-        print("Apple Screenshot button clicked")
-        return 0
+        if self.device is None:
+            self.log("[Error] Apple 기기가 연결되지 않았습니다.")
+            return
+
+        if self.device.get("detected_type") != "Apple":
+            self.log("[Error] 현재 연결된 기기는 Apple 기기가 아닙니다.")
+            return
+
+        if self.ios_device_controller is None:
+            self.log("[Error] Apple 컨트롤러가 초기화되지 않았습니다.")
+            return
+
+        self.run_task(
+            self.ios_device_controller.get_ios_screenshot
+            )
+    
+    def _convert_apple_date(self, date):
+        """yy-MM-dd를 YYYY-MM-DD로 변환한다."""
+        try:
+            return datetime.strptime(date, "%y-%m-%d").strftime("%Y-%m-%d")
+        except (TypeError, ValueError):
+            return datetime.now().strftime("%Y-%m-%d")
+
+
     def cmd_apple_download_photos(self, date):
-        print("Apple Download Photos button clicked")
-        return 0
+        if self.ios_device_controller is None:
+            self.log("[Error] Apple 컨트롤러가 초기화되지 않았습니다.")
+            return
+
+        target_date = self._convert_apple_date(date)
+        self.log(f"[Apple] {target_date} 사진 다운로드를 시작합니다.")
+
+        self.run_task(
+            self.ios_device_controller.download_photos_by_date,
+            target_date
+        )
+
+
     def cmd_apple_download_crash_dump(self, date):
-        print("Apple Download Crash Dump button clicked")
-        return 0
+        if self.ios_device_controller is None:
+            self.log("[Error] Apple 컨트롤러가 초기화되지 않았습니다.")
+            return
+
+        target_date = self._convert_apple_date(date)
+        self.log(f"[Apple] {target_date} Crash Dump 다운로드를 시작합니다.")
+
+        self.run_task(
+            self.ios_device_controller.get_crash_logs,
+            target_date
+        )
+
+
     def cmd_apple_download_logs(self, date):
-        print("Apple Download Logs button clicked")
-        return 0
+        if self.ios_device_controller is None:
+            self.log("[Error] Apple 컨트롤러가 초기화되지 않았습니다.")
+            return
+
+        target_date = self._convert_apple_date(date)
+        self.log(f"[Apple] {target_date} 앱 로그 다운로드를 시작합니다.")
+
+        self.run_task(
+            self.ios_device_controller.download_filtered_logs,
+            target_date
+        )
+
 
 class CustomInputDialog(QDialog):
     def __init__(self, parent=None, title="Title", label="Value:", value="", is_int=False):

@@ -1,5 +1,4 @@
 import os
-import sys
 import time
 import shutil
 import tempfile
@@ -13,10 +12,9 @@ from pymobiledevice3.services.crash_reports import CrashReportsManager
 from pymobiledevice3.services.house_arrest import HouseArrestService
 from pymobiledevice3.services.installation_proxy import InstallationProxyService
 
-# 설정 및 로깅 모듈 연동 (프로젝트 구조에 맞게 임포트 경로 확인 필요)
-# import configus
-# from . import loggas
-# logging = loggas.logger
+from src.utils import loggas, configus
+
+logging = loggas.logger
 
 
 class IOSDeviceController:
@@ -32,8 +30,9 @@ class IOSDeviceController:
 
         # [추가] 설정 파일 로드
         try:
-            self.config = configus.load_config('static/config.json')
-        except NameError:
+            self.config = configus.load_config('resources/configs/config.json')
+        except Exception as e:
+            logging.warning(f"iOS 설정 파일 로드 실패: {e}")
             # configus 모듈이 임포트되지 않았을 때를 위한 임시 가드 (실제 환경에 맞게 조정 가능)
             self.config = {"local_path": str(Path.home() / "Desktop")}
 
@@ -44,6 +43,35 @@ class IOSDeviceController:
         self.base_dir = Path(folder_path)
         self.log_dir = self.base_dir / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
+
+
+    def _pull_recursive(self, afc, remote_path, local_base_path):
+        """폴더와 파일을 구분하여 재귀적으로 다운로드하는 내부 헬퍼 함수"""
+        item_name = os.path.basename(remote_path)
+        
+        try:
+            content = afc.get_file_contents(remote_path)
+            local_file_path = local_base_path / item_name
+            print(f"📥 파일 다운로드 중: {remote_path}")
+            with open(local_file_path, "wb") as f:
+                f.write(content)
+                
+        except Exception as e:
+            if "isn't a file" in str(e) or "INVALID_ARG" in str(e):
+                new_local_dir = local_base_path / item_name
+                new_local_dir.mkdir(parents=True, exist_ok=True)
+                
+                try:
+                    children = afc.listdir(remote_path)
+                    for child in children:
+                        if child in (".", ".."):
+                            continue
+                        self._pull_recursive(afc, f"{remote_path}/{child}", new_local_dir)
+                except Exception as list_err:
+                    print(f"⚠️ 폴더 목록 읽기 실패 ({remote_path}): {list_err}")
+            else:
+                print(f"❌ 처리 불가 경로 ({remote_path}): {e}")
+
 
     def get_apps(self, bundle_id=None):
         """app 미설치 시 전체 어플 리스트 반환 / bundle_id가 있으면 해당 app 정보만 반환"""
@@ -89,32 +117,6 @@ class IOSDeviceController:
             except Exception as e:
                 print(f"❌ 크래시 로그 추출 중 오류 발생: {e}")
 
-    def _pull_recursive(self, afc, remote_path, local_base_path):
-        """폴더와 파일을 구분하여 재귀적으로 다운로드하는 내부 헬퍼 함수"""
-        item_name = os.path.basename(remote_path)
-        
-        try:
-            content = afc.get_file_contents(remote_path)
-            local_file_path = local_base_path / item_name
-            print(f"📥 파일 다운로드 중: {remote_path}")
-            with open(local_file_path, "wb") as f:
-                f.write(content)
-                
-        except Exception as e:
-            if "isn't a file" in str(e) or "INVALID_ARG" in str(e):
-                new_local_dir = local_base_path / item_name
-                new_local_dir.mkdir(parents=True, exist_ok=True)
-                
-                try:
-                    children = afc.listdir(remote_path)
-                    for child in children:
-                        if child in (".", ".."):
-                            continue
-                        self._pull_recursive(afc, f"{remote_path}/{child}", new_local_dir)
-                except Exception as list_err:
-                    print(f"⚠️ 폴더 목록 읽기 실패 ({remote_path}): {list_err}")
-            else:
-                print(f"❌ 처리 불가 경로 ({remote_path}): {e}")
 
     def download_logs_final(self, bundle_id="hmi.navis.NMaps"):
         """전체 bundle_id의 로그 전체를 재귀적으로 다운로드합니다 (미필터링)"""
@@ -285,7 +287,7 @@ class IOSDeviceController:
         except Exception as e:
             print(f"\n❌ 사진 필터링 복사 중 오류 발생: {e}")
 
-    def get_ios_screenshot_fixed(self):
+    def get_ios_screenshot(self):
         """터널 데몬 프로세스를 구동하여 안전하게 iOS 기기 스크린샷을 확보합니다."""
         current_dir = self.base_dir / "IOS" / "screenshot"
         current_dir.mkdir(parents=True, exist_ok=True)
