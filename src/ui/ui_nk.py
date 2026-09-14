@@ -60,7 +60,7 @@ class StreamToLogger(QObject):
 
 # --- 2. 백그라운드 작업을 담당할 Worker 클래스 ---
 class Worker(QThread):
-    finished = pyqtSignal(str)
+    finished = pyqtSignal(object)
 
     def __init__(self, func, *args):
         super().__init__()
@@ -69,9 +69,9 @@ class Worker(QThread):
 
     def run(self):
         try:
-            self.func(*self.args)
+            result = self.func(*self.args)
             time.sleep(1)  # 테스트용 딜레이
-            self.finished.emit("Success")
+            self.finished.emit(result)
         except Exception as e:
             self.finished.emit(f"Error: {str(e)}")
 
@@ -263,6 +263,7 @@ class MainWindow(QMainWindow):
         self.nav_ctrl_manager = None #NaviController 초기선언
         self.and_log_manager = None #AndroidLogManager 초기선언
         self.keyboard_manager = None #KeyboardController 초기선언
+        self.aa_manager = None       #AndroidRecordManager 초기선언
         self.device_type = None
         self.current_config = None
         self.is_scanning = False    # 기기 스캔 중 복수 실행 방지 플래그
@@ -568,8 +569,8 @@ class MainWindow(QMainWindow):
         else:
             self.connect_selected_device()
 
-    def disconnect_device(self):
-        """모든 연결 및 로깅 작업을 안전하게 종료하고 위젯을 빈 화면으로 되돌림"""
+    def disconnect_device(self, connection_lost=False):
+        """모든 연결 및 로깅 작업을 종료하고 연결 상태를 UI에 반영합니다."""
         self.log("Disconnecting device...")
 
         # 1. 헬스 체크 타이머 정지 (안전한 hasattr 검사 사용)
@@ -595,24 +596,35 @@ class MainWindow(QMainWindow):
         self.and_log_manager = None  # [수정] None으로 초기화
         self.nav_ctrl_manager = None # [수정] None으로 초기화
         self.keyboard_manager = None # [수정] None으로 초기화
-        self.aa_manager.stop() # 먼저 스레드 종료 후
+        if self.aa_manager is not None:
+            self.aa_manager.stop() # 먼저 스레드 종료 후
         self.aa_manager = None #None으로 초기화
         
         self.version_found_flag = False
-        self.sw_version = "Checking..."
-        self.map_version = "Checking..."
+        if connection_lost:
+            self.sw_version = "Disconnected"
+            self.map_version = "Disconnected"
+        else:
+            self.sw_version = "Checking..."
+            self.map_version = "Checking..."
 
         # 5. UI 요소 리셋
         self.combo_device.setEnabled(True)
         self.btn_device_refresh.setEnabled(True)
         self.btn_device_connect.setText("Connect")
-        self.title_label.setText(f"{self.version} - No device selected")
+        if connection_lost:
+            self.title_label.setText(f"{self.version} - Disconnected")
+        else:
+            self.title_label.setText(f"{self.version} - No device selected")
         self.set_interaction_buttons_enabled(False)
         self.refresh_display()
 
         # 6. 연결 해제 시 스택 위젯을 빈 화면(Blank)으로 전환
         self.control_stack.setCurrentIndex(0)
-        self.log("Device disconnected successfully.")
+        if connection_lost:
+            self.log("Device connection lost.")
+        else:
+            self.log("Device disconnected successfully.")
 
     def connect_selected_device(self):
         """기기 연결 및 기기 타입별 뷰 포트 스위칭 로직"""
@@ -622,6 +634,11 @@ class MainWindow(QMainWindow):
             return
 
         self.device = self.devices[current_index]
+        self.version_found_flag = False
+        self.version_info.clear()
+        self.sw_version = "Checking..."
+        self.map_version = "Checking..."
+        self.refresh_display()
         dev_type_str = self.device.get('detected_type', 'Device')
 
         # [수정] NaviController 객체 선언
@@ -697,7 +714,7 @@ class MainWindow(QMainWindow):
                 self.workers.remove(worker)
             
             # 장치가 등록되어 있는데 헬스체크 결과가 False(또는 None)인 경우
-            if self.device is not None and not result:
+            if self.device is target_dev and not result:
                 logging.warning("⚠️ Device connection lost! Stopping timers and disconnecting...")
                 
                 # 🟢 [핵심 1] 5초 주기 버전 수집 타이머를 즉시 중지 (무한 재시작 방지)
@@ -705,7 +722,7 @@ class MainWindow(QMainWindow):
                     self.timer.stop()
 
                 # 🟢 [핵심 2] disconnect_device() 호출
-                self.disconnect_device()
+                self.disconnect_device(connection_lost=True)
 
         worker = Worker(task)
         worker.daemon = True
@@ -807,7 +824,7 @@ class MainWindow(QMainWindow):
                         self.restart_background_tasks()
                 else:
                     logging.warning("Device disconnected unexpectedly. Triggering disconnect_device()...")
-                    self.disconnect_device()
+                    self.disconnect_device(connection_lost=True)
                     return
 
         sw_version = self.version_info.get('sw_version')
@@ -964,7 +981,9 @@ class MainWindow(QMainWindow):
         worker = Worker(func, *args)
         worker.daemon = True
         self.workers.append(worker)
-        worker.finished.connect(lambda: self.cleanup_worker(worker, sender_button)) 
+        worker.finished.connect(
+            lambda _result=None: self.cleanup_worker(worker, sender_button)
+        ) 
         worker.start()
 
     def cleanup_worker(self, worker, button=None):
