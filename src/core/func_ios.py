@@ -6,6 +6,7 @@ import time
 import shutil
 import tempfile
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -418,38 +419,23 @@ class IOSDeviceController:
 
 
     def get_ios_screenshot(self):
-        """iPhone 화면과 연결된 CarPlay 화면의 스크린샷을 저장합니다."""
+        """iPhone 화면과 연결된 CarPlay 화면을 가능한 한 동시에 캡처합니다."""
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         save_path = self.base_dir / f"Screenshot_{timestamp}.png"
         carplay_path = self.base_dir / f"Screenshot_{timestamp}_carplay.png"
 
-        # 기본 iPhone 화면은 기존 DVT 방식을 유지합니다.
-        phone_result = subprocess.run(
-            [
-                "pymobiledevice3",
-                "developer",
-                "dvt",
-                "screenshot",
-                str(save_path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=45,
-        )
+        phone_command = [
+            "pymobiledevice3",
+            "developer",
+            "dvt",
+            "screenshot",
+            str(save_path),
+        ]
+        carplay_command = None
 
-        if phone_result.returncode != 0 or not save_path.exists():
-            print("❌ iPhone 스크린샷 촬영에 실패했습니다.")
-            print(phone_result.stderr or phone_result.stdout)
-            return None
-
-        print(
-            f"✅ iPhone 스크린샷 저장 완료: "
-            f"{save_path} ({save_path.stat().st_size} bytes)"
-        )
-
-        # display ID와 uniqueId는 연결마다 달라질 수 있으므로 매번 조회합니다.
+        # display ID와 uniqueId는 연결마다 달라질 수 있으므로 촬영 전에 조회합니다.
         try:
             display_result = subprocess.run(
                 [
@@ -462,90 +448,117 @@ class IOSDeviceController:
                 text=True,
                 timeout=45,
             )
+
+            if display_result.returncode == 0:
+                display_info = json.loads(display_result.stdout)
+                active_external_displays = []
+
+                for display in display_info.get("displays", []):
+                    if not display.get("external"):
+                        continue
+
+                    unique_id = display.get("uniqueId") or display.get(
+                        "displayUniqueID"
+                    )
+                    size = display.get("currentMode", {}).get("size", [0, 0])
+
+                    if (
+                        unique_id
+                        and isinstance(size, (list, tuple))
+                        and len(size) >= 2
+                        and size[0] > 0
+                        and size[1] > 0
+                    ):
+                        active_external_displays.append(display)
+
+                if active_external_displays:
+                    # CarPlay는 일반적으로 wireless 디스플레이로 노출됩니다.
+                    active_external_displays.sort(
+                        key=lambda display: (
+                            not str(
+                                display.get("deviceName", "")
+                            ).lower().startswith("wireless"),
+                            str(display.get("deviceName", "")),
+                        )
+                    )
+                    carplay_display = active_external_displays[0]
+                    carplay_unique_id = carplay_display.get(
+                        "uniqueId"
+                    ) or carplay_display.get("displayUniqueID")
+                    carplay_command = [
+                        "pymobiledevice3",
+                        "developer",
+                        "core-device",
+                        "screen-capture",
+                        "screenshot",
+                        str(carplay_path),
+                        "--display-unique-id",
+                        carplay_unique_id,
+                    ]
+                else:
+                    print("ℹ️ 활성 CarPlay 디스플레이가 없어 iPhone 화면만 촬영합니다.")
+            else:
+                print("ℹ️ CarPlay 디스플레이를 조회하지 못해 iPhone 화면만 촬영합니다.")
+                error_message = (
+                    display_result.stderr or display_result.stdout
+                ).strip()
+                if error_message:
+                    logging.debug(error_message)
         except (OSError, subprocess.TimeoutExpired) as e:
             print(f"⚠️ 외부 디스플레이 조회 실패: {e}")
-            return save_path
-
-        if display_result.returncode != 0:
-            print("ℹ️ CarPlay 디스플레이를 조회하지 못해 iPhone 화면만 저장했습니다.")
-            error_message = (display_result.stderr or display_result.stdout).strip()
-            if error_message:
-                logging.debug(error_message)
-            return save_path
-
-        try:
-            display_info = json.loads(display_result.stdout)
         except (TypeError, json.JSONDecodeError) as e:
             print(f"⚠️ 디스플레이 정보 파싱 실패: {e}")
+
+        capture_jobs = {
+            "iPhone": (phone_command, save_path),
+        }
+        if carplay_command:
+            capture_jobs["CarPlay"] = (carplay_command, carplay_path)
+
+        def capture_screen(command, output_path):
+            try:
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=45,
+                )
+                return result, result.returncode == 0 and output_path.exists()
+            except (OSError, subprocess.TimeoutExpired) as e:
+                return e, False
+
+        capture_success = {}
+        with ThreadPoolExecutor(max_workers=len(capture_jobs)) as executor:
+            futures = {
+                executor.submit(capture_screen, command, output_path): (
+                    display_name,
+                    output_path,
+                )
+                for display_name, (command, output_path) in capture_jobs.items()
+            }
+
+            for future in as_completed(futures):
+                display_name, output_path = futures[future]
+                result, success = future.result()
+                capture_success[display_name] = success
+
+                if success:
+                    print(
+                        f"✅ {display_name} 스크린샷 저장 완료: "
+                        f"{output_path} ({output_path.stat().st_size} bytes)"
+                    )
+                    continue
+
+                print(f"⚠️ {display_name} 스크린샷 촬영에 실패했습니다.")
+                if isinstance(result, Exception):
+                    print(result)
+                else:
+                    error_message = (result.stderr or result.stdout).strip()
+                    if error_message:
+                        logging.debug(error_message)
+
+        if capture_success.get("iPhone"):
             return save_path
-
-        active_external_displays = []
-        for display in display_info.get("displays", []):
-            if not display.get("external"):
-                continue
-
-            unique_id = display.get("uniqueId") or display.get(
-                "displayUniqueID"
-            )
-            size = display.get("currentMode", {}).get("size", [0, 0])
-
-            if (
-                unique_id
-                and isinstance(size, (list, tuple))
-                and len(size) >= 2
-                and size[0] > 0
-                and size[1] > 0
-            ):
-                active_external_displays.append(display)
-
-        if not active_external_displays:
-            print("ℹ️ 활성 CarPlay 디스플레이가 없어 iPhone 화면만 저장했습니다.")
-            return save_path
-
-        # CarPlay는 일반적으로 wireless 디스플레이로 노출되므로 우선 선택합니다.
-        active_external_displays.sort(
-            key=lambda display: (
-                not str(display.get("deviceName", "")).lower().startswith(
-                    "wireless"
-                ),
-                str(display.get("deviceName", "")),
-            )
-        )
-        carplay_display = active_external_displays[0]
-        carplay_unique_id = carplay_display.get(
-            "uniqueId"
-        ) or carplay_display.get("displayUniqueID")
-
-        try:
-            carplay_result = subprocess.run(
-                [
-                    "pymobiledevice3",
-                    "developer",
-                    "core-device",
-                    "screen-capture",
-                    "screenshot",
-                    str(carplay_path),
-                    "--display-unique-id",
-                    carplay_unique_id,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=45,
-            )
-        except (OSError, subprocess.TimeoutExpired) as e:
-            print(f"⚠️ CarPlay 스크린샷 촬영 실패: {e}")
-            return save_path
-
-        if carplay_result.returncode == 0 and carplay_path.exists():
-            print(
-                f"✅ CarPlay 스크린샷 저장 완료: "
-                f"{carplay_path} ({carplay_path.stat().st_size} bytes)"
-            )
-        else:
-            print("⚠️ CarPlay 스크린샷 촬영에 실패해 iPhone 화면만 저장했습니다.")
-            error_message = (carplay_result.stderr or carplay_result.stdout).strip()
-            if error_message:
-                logging.debug(error_message)
-
-        return save_path
-
+        if capture_success.get("CarPlay"):
+            return carplay_path
+        return None
