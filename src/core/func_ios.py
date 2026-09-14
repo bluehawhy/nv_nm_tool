@@ -154,31 +154,6 @@ class IOSDeviceController:
                 print(f"❌ 크래시 로그 추출 중 오류 발생: {e}")
 
 
-    def download_logs_final(self, bundle_id="hmi.navis.NMaps"):
-        """전체 bundle_id의 로그 전체를 재귀적으로 다운로드합니다 (미필터링)"""
-        remote_root = "Documents/log"
-        local_root = self.base_dir / "ios_app_logs"
-        local_root.mkdir(parents=True, exist_ok=True)
-
-        try:
-            with HouseArrestService(self.lockdown, bundle_id) as afc:
-                print(f"📂 '{bundle_id}' 샌드박스 접근 성공")
-                
-                if not afc.exists(remote_root):
-                    print(f"❌ 장치 내 경로 없음: {remote_root}")
-                    return
-
-                items = afc.listdir(remote_root)
-                for item in items:
-                    if item in (".", ".."):
-                        continue
-                    self._pull_recursive(afc, f"{remote_root}/{item}", local_root)
-                        
-            print(f"\n✅ 작업 완료! 저장 위치: {local_root.absolute()}")
-
-        except Exception as e:
-            print(f"❌ 샌드박스 로그 다운로드 중 치명적 오류: {e}")
-
     def download_filtered_logs(self, set_date_str, bundle_id="hmi.navis.NMaps"):
         """특정일(YYYY-MM-DD)의 bundle_id 로그 파일만 필터링하여 다운로드합니다."""
         remote_root = "Documents/log"
