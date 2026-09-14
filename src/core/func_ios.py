@@ -1,4 +1,5 @@
 import os
+import asyncio
 import time
 import shutil
 import tempfile
@@ -203,53 +204,83 @@ class IOSDeviceController:
 
     def download_photos_by_date(self, set_date_str=None, target_ext=None):
         """특정 수정 일자 및 특정 확장자(.JPG, .PNG 등)를 기준으로 사진을 필터링하여 다운로드합니다."""
-        folder_suffix = set_date_str if set_date_str else "filtered"
-        save_dir = self.base_dir / "IOS" / folder_suffix / "ios_pic"
-        save_dir.mkdir(parents=True, exist_ok=True)
-        
-        print(f"🚀 사진 필터링 다운로드 시작 (날짜: {set_date_str}, 확장자: {target_ext})")
-
         try:
-            with AfcService(self.lockdown) as afc:
-                remote_base = "/DCIM"
-                sub_dirs = [d for d in afc.listdir(remote_base) if d not in (".", "..")]
-                
-                for sub_dir in sub_dirs:
-                    remote_sub_path = f"{remote_base}/{sub_dir}"
-                    photos = [p for p in afc.listdir(remote_sub_path) if p not in (".", "..")]
-
-                    for photo_name in photos:
-                        if target_ext and not photo_name.upper().endswith(target_ext.upper()):
-                            continue
-
-                        remote_path = f"{remote_sub_path}/{photo_name}"
-
-                        if set_date_str:
-                            info = afc.stat(remote_path)
-                            mtime = info.get("st_mtime") 
-                            
-                            try:
-                                file_date = mtime.strftime('%Y-%m-%d')
-                            except AttributeError:
-                                file_date = datetime.fromtimestamp(mtime / 1000000000).strftime('%Y-%m-%d')
-                            
-                            if file_date != set_date_str:
-                                continue
-                        else:
-                            file_date = sub_dir
-
-                        local_path = save_dir / photo_name
-                        if local_path.exists() and local_path.stat().st_size > 0:
-                            continue
-
-                        print(f"📥 [{file_date}] {photo_name} 다운로드 중...", end="\r", flush=True)
-                        afc.pull(remote_path, str(local_path))
-                
-                print("\n✅ 필터링 기반 사진 다운로드 완료!")
-
+            asyncio.run(
+                self._download_photos_by_date_async(
+                    set_date_str=set_date_str,
+                    target_ext=target_ext,
+                )
+            )
         except Exception as e:
             print(f"\n❌ 사진 필터링 복사 중 오류 발생: {e}")
 
+
+    async def _download_photos_by_date_async(self, set_date_str=None, target_ext=None):
+        """pymobiledevice3 비동기 AFC API를 사용하여 사진을 다운로드합니다."""
+        folder_suffix = set_date_str if set_date_str else "filtered"
+        save_dir = self.base_dir / "IOS" / folder_suffix / "ios_pic"
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"🚀 사진 필터링 다운로드 시작 (날짜: {set_date_str}, 확장자: {target_ext})")
+
+        async with AfcService(self.lockdown) as afc:
+            remote_base = "/DCIM"
+            sub_dirs = [
+                item
+                for item in await afc.listdir(remote_base)
+                if item not in (".", "..")
+            ]
+
+            download_count = 0
+
+            for sub_dir in sub_dirs:
+                remote_sub_path = f"{remote_base}/{sub_dir}"
+                photos = [
+                    item
+                    for item in await afc.listdir(remote_sub_path)
+                    if item not in (".", "..")
+                ]
+
+                for photo_name in photos:
+                    if target_ext and not photo_name.upper().endswith(target_ext.upper()):
+                        continue
+
+                    remote_path = f"{remote_sub_path}/{photo_name}"
+
+                    if set_date_str:
+                        info = await afc.stat(remote_path)
+                        mtime = info.get("st_mtime")
+
+                        if isinstance(mtime, datetime):
+                            file_date = mtime.strftime("%Y-%m-%d")
+                        elif isinstance(mtime, (int, float)):
+                            # 구버전 AFC가 나노초 timestamp를 반환하는 경우도 처리합니다.
+                            timestamp = mtime / 1_000_000_000 if mtime > 10_000_000_000 else mtime
+                            file_date = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
+                        else:
+                            logging.warning(
+                                f"사진 수정 시간을 확인할 수 없어 건너뜁니다: {remote_path}"
+                            )
+                            continue
+
+                        if file_date != set_date_str:
+                            continue
+                    else:
+                        file_date = sub_dir
+
+                    local_path = save_dir / photo_name
+                    if local_path.exists() and local_path.stat().st_size > 0:
+                        continue
+
+                    print(
+                        f"📥 [{file_date}] {photo_name} 다운로드 중...",
+                        end="\r",
+                        flush=True,
+                    )
+                    await afc.pull(remote_path, str(local_path))
+                    download_count += 1
+
+        print(f"\n✅ 필터링 기반 사진 다운로드 완료! ({download_count}개)")
 
 
     def get_ios_screenshot(self):
