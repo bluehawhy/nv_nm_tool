@@ -14,6 +14,7 @@ from pymobiledevice3.services.afc import AfcService
 from pymobiledevice3.services.crash_reports import CrashReportsManager
 from pymobiledevice3.services.house_arrest import HouseArrestService
 from pymobiledevice3.services.installation_proxy import InstallationProxyService
+from pymobiledevice3.services.screenshot import ScreenshotService
 from pymobiledevice3.remote.core_device.device_info import DeviceInfoService
 from pymobiledevice3.remote.core_device.screen_capture_service import (
     ScreenCaptureService,
@@ -433,7 +434,7 @@ class IOSDeviceController:
 
 
     def get_ios_screenshot(self):
-        """내부 API로 iPhone과 CarPlay 화면을 가능한 한 동시에 캡처합니다."""
+        """내부 API로 Apple 기기와 CarPlay 화면을 가능한 한 동시에 캡처합니다."""
         try:
             return asyncio.run(self._get_ios_screenshot_async())
         except Exception as e:
@@ -443,6 +444,28 @@ class IOSDeviceController:
             )
             logging.debug(f"iOS 스크린샷 촬영 실패: {e}", exc_info=True)
             return None
+
+
+    def _get_device_display_name(self):
+        """lockdown 정보에서 사용자에게 표시할 Apple 장치 종류를 반환합니다."""
+        all_values = getattr(self.lockdown, "all_values", {}) or {}
+        device_class = str(all_values.get("DeviceClass", "")).lower()
+        product_type = str(all_values.get("ProductType", "")).lower()
+        model = str(self.device.get("model", "")).lower()
+
+        if (
+            device_class == "ipad"
+            or product_type.startswith("ipad")
+            or "ipad" in model
+        ):
+            return "iPad"
+        if (
+            device_class == "iphone"
+            or product_type.startswith("iphone")
+            or "iphone" in model
+        ):
+            return "iPhone"
+        return "Apple 기기"
 
 
     async def _get_ios_screenshot_async(self):
@@ -457,60 +480,89 @@ class IOSDeviceController:
             "identifier",
             None,
         )
+        device_display_name = self._get_device_display_name()
+
+        async def capture_primary_with_lockdown():
+            """RSD 캡처 실패 시 USB lockdown screenshotr 서비스로 재시도합니다."""
+            try:
+                async with ScreenshotService(self.lockdown) as screenshot_service:
+                    image_data = await screenshot_service.take_screenshot()
+
+                if not image_data:
+                    raise ValueError("스크린샷 이미지 데이터가 없습니다.")
+
+                save_path.write_bytes(image_data)
+                print(
+                    f"{device_display_name} 스크린샷 저장 완료: "
+                    f"{save_path} ({save_path.stat().st_size} bytes)"
+                )
+                return save_path
+            except Exception as e:
+                print(
+                    f"{device_display_name} USB 스크린샷 촬영 실패: "
+                    f"{type(e).__name__}: {e}"
+                )
+                logging.error(
+                    f"{device_display_name} lockdown 스크린샷 촬영 실패: {e}",
+                    exc_info=True,
+                )
+                return None
 
         async def capture_with_rsd(rsd):
             carplay_unique_id = None
 
-            try:
-                async with DeviceInfoService(rsd) as device_info_service:
-                    display_info = await device_info_service.get_display_info()
+            # iPad는 CarPlay 대상이 아니므로 외부 디스플레이 조회 자체를 생략합니다.
+            if device_display_name == "iPhone":
+                try:
+                    async with DeviceInfoService(rsd) as device_info_service:
+                        display_info = await device_info_service.get_display_info()
 
-                active_external_displays = []
-                for display in display_info.get("displays", []):
-                    if not display.get("external"):
-                        continue
+                    active_external_displays = []
+                    for display in display_info.get("displays", []):
+                        if not display.get("external"):
+                            continue
 
-                    unique_id = display.get("uniqueId") or display.get(
-                        "displayUniqueID"
-                    )
-                    size = display.get("currentMode", {}).get("size", [0, 0])
-
-                    if (
-                        unique_id
-                        and isinstance(size, (list, tuple))
-                        and len(size) >= 2
-                        and size[0] > 0
-                        and size[1] > 0
-                    ):
-                        active_external_displays.append(display)
-
-                if active_external_displays:
-                    active_external_displays.sort(
-                        key=lambda display: (
-                            not str(
-                                display.get("deviceName", "")
-                            ).lower().startswith("wireless"),
-                            str(display.get("deviceName", "")),
+                        unique_id = display.get("uniqueId") or display.get(
+                            "displayUniqueID"
                         )
-                    )
-                    carplay_display = active_external_displays[0]
-                    carplay_unique_id = carplay_display.get(
-                        "uniqueId"
-                    ) or carplay_display.get("displayUniqueID")
-                else:
+                        size = display.get("currentMode", {}).get("size", [0, 0])
+
+                        if (
+                            unique_id
+                            and isinstance(size, (list, tuple))
+                            and len(size) >= 2
+                            and size[0] > 0
+                            and size[1] > 0
+                        ):
+                            active_external_displays.append(display)
+
+                    if active_external_displays:
+                        active_external_displays.sort(
+                            key=lambda display: (
+                                not str(
+                                    display.get("deviceName", "")
+                                ).lower().startswith("wireless"),
+                                str(display.get("deviceName", "")),
+                            )
+                        )
+                        carplay_display = active_external_displays[0]
+                        carplay_unique_id = carplay_display.get(
+                            "uniqueId"
+                        ) or carplay_display.get("displayUniqueID")
+                    else:
+                        print(
+                            "ℹ활성 CarPlay 디스플레이가 없어 "
+                            f"{device_display_name} 화면만 촬영합니다."
+                        )
+                except Exception as e:
                     print(
-                        "ℹ활성 CarPlay 디스플레이가 없어 "
-                        "iPhone 화면만 촬영합니다."
+                        "ℹCarPlay 디스플레이를 조회하지 못해 "
+                        f"{device_display_name} 화면만 촬영합니다."
                     )
-            except Exception as e:
-                print(
-                    "ℹCarPlay 디스플레이를 조회하지 못해 "
-                    "iPhone 화면만 촬영합니다."
-                )
-                logging.debug(
-                    f"CarPlay 디스플레이 조회 실패: {e}",
-                    exc_info=True,
-                )
+                    logging.debug(
+                        f"CarPlay 디스플레이 조회 실패: {e}",
+                        exc_info=True,
+                    )
 
             async def capture_screen(display_name, output_path, unique_id):
                 try:
@@ -530,15 +582,18 @@ class IOSDeviceController:
                     )
                     return output_path
                 except Exception as e:
-                    print(f"{display_name} 스크린샷 촬영에 실패했습니다.")
-                    logging.debug(
+                    print(
+                        f"{display_name} RSD 스크린샷 촬영 실패: "
+                        f"{type(e).__name__}: {e}"
+                    )
+                    logging.error(
                         f"{display_name} 스크린샷 촬영 실패: {e}",
                         exc_info=True,
                     )
                     return None
 
             capture_tasks = [
-                capture_screen("iPhone", save_path, None),
+                capture_screen(device_display_name, save_path, None),
             ]
             if carplay_unique_id:
                 capture_tasks.append(
@@ -553,6 +608,9 @@ class IOSDeviceController:
 
             if save_path in capture_results:
                 return save_path
+            primary_fallback_path = await capture_primary_with_lockdown()
+            if primary_fallback_path:
+                return primary_fallback_path
             if carplay_path in capture_results:
                 return carplay_path
             return None
@@ -591,9 +649,9 @@ class IOSDeviceController:
             if rsd is None:
                 print(
                     "ℹ️ 내장 터널과 실행 중인 tunneld 연결을 "
-                    "모두 찾을 수 없습니다."
+                    "모두 찾을 수 없어 USB 방식으로 재시도합니다."
                 )
-                return None
+                return await capture_primary_with_lockdown()
 
             return await capture_with_rsd(rsd)
         finally:
