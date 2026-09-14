@@ -303,7 +303,7 @@ class IOSDeviceController:
                 if set_date_str:
                     info = await afc.stat(remote_path)
 
-                    # 수정일(st_mtime)은 사용하지 않고 생성일만 기준으로 판정합니다.
+                    # 생성일만 기준으로 날짜를 판정합니다.
                     birth_time = info.get("st_birthtime")
 
                     if isinstance(birth_time, datetime):
