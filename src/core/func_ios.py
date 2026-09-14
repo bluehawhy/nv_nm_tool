@@ -201,58 +201,6 @@ class IOSDeviceController:
         except Exception as e:
             print(f"❌ 필터 로그 다운로드 중 오류 발생: {e}")
 
-    def download_all_photos(self):
-        """기기 내 모든 사진(/DCIM)을 다운로드합니다."""
-        save_dir = self.base_dir / "IOS" / "ios_pic_all"
-        save_dir.mkdir(parents=True, exist_ok=True)
-        
-        print("🚀 모든 사진/동영상 다운로드를 시작합니다 (DCIM pull)...")
-
-        try:
-            with AfcService(self.lockdown) as afc:
-                remote_base = "/DCIM"
-                
-                if not afc.exists(remote_base):
-                    print("❌ DCIM 폴더를 찾을 수 없습니다. 장치 잠금을 해제해 주세요.")
-                    return
-
-                sub_dirs = [d for d in afc.listdir(remote_base) if d not in (".", "..")]
-                
-                for sub_dir in sub_dirs:
-                    remote_sub_path = f"{remote_base}/{sub_dir}"
-                    current_local_dir = save_dir / sub_dir
-                    current_local_dir.mkdir(parents=True, exist_ok=True)
-                    
-                    print(f"📂 폴더 진입: {remote_sub_path}")
-                    
-                    try:
-                        photos = [p for p in afc.listdir(remote_sub_path) if p not in (".", "..")]
-                    except Exception:
-                        continue
-
-                    for photo_name in photos:
-                        remote_path = f"{remote_sub_path}/{photo_name}"
-                        local_path = current_local_dir / photo_name
-                        
-                        if local_path.exists() and local_path.stat().st_size > 0:
-                            continue
-
-                        try:
-                            info = afc.stat(remote_path)
-                            size_mb = int(info.get("st_size", 0)) / (1024 * 1024)
-                            
-                            print(f"📥 [{sub_dir}] {photo_name} ({size_mb:.1f} MB) 다운로드 중...", end="\r", flush=True)
-                            afc.pull(remote_path, str(local_path))
-                            print(f"📥 [{sub_dir}] {photo_name} 완료!                      ")
-                        except Exception as e:
-                            print(f"❌ {photo_name} 다운로드 실패: {e}")
-                
-                print("\n✅ 모든 사진 저장 완료!")
-
-        except Exception as e:
-            print(f"\n❌ 사진 다운로드 중 치명적 오류: {e}")
-
-
     def download_photos_by_date(self, set_date_str=None, target_ext=None):
         """특정 수정 일자 및 특정 확장자(.JPG, .PNG 등)를 기준으로 사진을 필터링하여 다운로드합니다."""
         folder_suffix = set_date_str if set_date_str else "filtered"
