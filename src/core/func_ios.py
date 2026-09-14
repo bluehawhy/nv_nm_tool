@@ -303,22 +303,17 @@ class IOSDeviceController:
                 if set_date_str:
                     info = await afc.stat(remote_path)
 
-                    # 수정일은 편집·동기화 시 바뀔 수 있으므로 생성일을 우선 사용합니다.
-                    media_time = info.get("st_birthtime")
-                    if media_time is None:
-                        media_time = info.get("st_mtime")
-                        logging.debug(
-                            f"생성일이 없어 수정일로 대체합니다: {remote_path}"
-                        )
+                    # 수정일(st_mtime)은 사용하지 않고 생성일만 기준으로 판정합니다.
+                    birth_time = info.get("st_birthtime")
 
-                    if isinstance(media_time, datetime):
-                        file_date = media_time.strftime("%Y-%m-%d")
-                    elif isinstance(media_time, (int, float)):
+                    if isinstance(birth_time, datetime):
+                        file_date = birth_time.strftime("%Y-%m-%d")
+                    elif isinstance(birth_time, (int, float)):
                         # 구버전 AFC가 나노초 timestamp를 반환하는 경우도 처리합니다.
                         timestamp = (
-                            media_time / 1_000_000_000
-                            if media_time > 10_000_000_000
-                            else media_time
+                            birth_time / 1_000_000_000
+                            if birth_time > 10_000_000_000
+                            else birth_time
                         )
                         file_date = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
                     else:
