@@ -1,16 +1,17 @@
 import sys
 import os
-import re
 import time
+from datetime import datetime
 
 # PyQt6 Core, GUI, Widgets 통합 임포트
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QPoint
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QPoint, QDate
 from PyQt6.QtGui import QTextCursor, QFont, QColor
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFrame, QDialog,
     QVBoxLayout, QHBoxLayout, QGroupBox, QSizePolicy, 
     QPushButton, QLabel, QLineEdit, QTextEdit, QComboBox, QStackedWidget,
-    QInputDialog, QFileDialog
+    QInputDialog, QFileDialog,
+    QDateEdit
 )
 
 # 사용자 정의 로컬 모듈 임포트
@@ -151,7 +152,7 @@ class AndroidWidget(QWidget):
         layout.addStretch(1)
 
 
-# (2) 애플 컨트롤 위젯 (임시 구현)
+# (2) 애플 컨트롤 위젯
 class AppleWidget(QWidget):
     def __init__(self, main_window):
         super().__init__()
@@ -163,21 +164,116 @@ class AppleWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        apple_label = QLabel("APPLE CONTROL")
-        apple_label.setProperty("class", "sectionLabel")
-        layout.addWidget(apple_label)
+        # MAIN COMMANDS
+        main_cmd_label = QLabel("MAIN COMMANDS")
+        main_cmd_label.setProperty("class", "sectionLabel")
+        layout.addWidget(main_cmd_label)
 
-        # 임시 버튼 2개
-        self.btn_apple_action1 = self.main_window.add_btn(layout, "Apple Action 1", self.cmd_apple_action1)
-        self.btn_apple_action2 = self.main_window.add_btn(layout, "Apple Action 2", self.cmd_apple_action2)
+        # 1. 스크린샷 촬영
+        self.main_window.add_btn(layout,"Take Screenshot",self.main_window.cmd_apple_screenshot)
 
+        layout.addSpacing(5)
+
+        # DATA DOWNLOAD
+        data_label = QLabel("DATA DOWNLOAD")
+        data_label.setProperty("class", "sectionLabel")
+        layout.addWidget(data_label)
+
+        # 날짜 입력
+        date_layout = QHBoxLayout()
+        # 날짜 입력
+        self.apple_date_input = QLineEdit()
+        self.apple_date_input.setPlaceholderText("yy-MM-dd")
+        self.apple_date_input.setText(datetime.now().strftime("%y-%m-%d"))
+        self.apple_date_input.setToolTip(
+            "날짜 입력 예: 20260914, 26 09 14, 2026 09 14, "
+            "2026-09-14, 26-09-14"
+        )
+
+        # 입력 완료 시 yy-MM-dd로 변환
+        self.apple_date_input.editingFinished.connect(
+            self._normalize_apple_date
+        )
+
+        date_layout.addWidget(QLabel("Date"))
+        date_layout.addWidget(self.apple_date_input)
+
+        layout.addLayout(date_layout)
+
+        # 2. 사진 받아오기
+        self.main_window.add_btn(layout,"Download Photos",self.cmd_download_photos)
+        # 3. Crash Dump 받아오기
+        self.main_window.add_btn(layout,"Download Crash Dump",self.cmd_download_crash_dump)
+        # 4. 로그 받아오기
+        self.main_window.add_btn(layout,"Download Logs",self.cmd_download_logs)
+
+        layout.addSpacing(5)
         layout.addStretch(1)
 
-    def cmd_apple_action1(self):
-        self.main_window.log("Apple Action 1 triggered.")
+    def _normalize_apple_date(self):
+        """
+        날짜 입력값을 yy-MM-dd 형식으로 변환한다.
 
-    def cmd_apple_action2(self):
-        self.main_window.log("Apple Action 2 triggered.")
+        지원:
+            20260914   -> 26-09-14
+            26 09 14   -> 26-09-14
+            2026 09 14 -> 26-09-14
+            2026-09-14 -> 26-09-14
+            26-09-14   -> 26-09-14
+
+        잘못된 날짜 -> 오늘 날짜
+        """
+
+        raw = self.apple_date_input.text().strip()
+
+        # -, 공백 제거
+        value = raw.replace("-", "").replace(" ", "")
+
+        try:
+            if not value.isdigit():
+                raise ValueError
+
+            if len(value) == 8:
+                # YYYYMMDD
+                parsed_date = datetime.strptime(value, "%Y%m%d")
+
+            elif len(value) == 6:
+                # YYMMDD
+                parsed_date = datetime.strptime(value, "%y%m%d")
+
+            else:
+                raise ValueError
+
+            result = parsed_date.strftime("%y-%m-%d")
+
+        except ValueError:
+            # 형식 오류 / 존재하지 않는 날짜 → 오늘
+            result = datetime.now().strftime("%y-%m-%d")
+
+        self.apple_date_input.setText(result)
+
+        return result
+
+    def _get_date(self):
+        return self._normalize_apple_date()
+
+    def cmd_download_photos(self):
+        date = self._get_date()
+        if date is None:
+            return
+        self.main_window.cmd_apple_download_photos(date)
+
+    def cmd_download_crash_dump(self):
+        date = self._get_date()
+        if date is None:
+            return
+        self.main_window.cmd_apple_download_crash_dump(date)
+
+    def cmd_download_logs(self):
+        date = self._get_date()
+        if date is None:
+            return
+        self.main_window.cmd_apple_download_logs(date)
 
 
 # (3) TWD_ADB 컨트롤 위젯 (임시 구현)
@@ -1009,7 +1105,6 @@ class MainWindow(QMainWindow):
         except ValueError:
             duration = None
         self.run_task(self.aa_manager.record_video, duration)
-
     def cmd_tk_screenshot(self): self.run_task(self.aa_manager.record_screenshot,)
     def cmd_demo_on(self): self.run_task(self.nav_ctrl_manager.set_demo_mode, "START")
     def cmd_demo_stop(self): self.run_task(self.nav_ctrl_manager.set_demo_mode, "STOP")
@@ -1018,19 +1113,15 @@ class MainWindow(QMainWindow):
     def cmd_set_car_pos(self): self.run_task(self.nav_ctrl_manager.select_latter_eng, "set car position")
     def cmd_set_demo_simulation_overlay(self): self.run_task(self.nav_ctrl_manager.select_latter_eng, "demo simulation overlay")
     def cmd_set_hybrid_navigation_info(self): self.run_task(self.nav_ctrl_manager.select_latter_box_eng,  'hybrid navigation info', '-')
-
     def cmd_set_mv_debug(self): 
         val, ok = CustomInputDialog.get_int(self, "MV Debug", "Value:", 149)
         if ok: self.run_task(self.nav_ctrl_manager.select_latter_box_eng, 'mv debug menu', val)
-
     def cmd_demo_speed(self):
         val, ok = CustomInputDialog.get_int(self, "Demo Speed", "Value:", 6)
         if ok: self.run_task(self.nav_ctrl_manager.select_latter_box_eng, 'simulation speed', val)
-
     def cmd_send_txt(self):
         text, ok = CustomInputDialog.get_text(self, "Send Text", "Please write the text you want to input:")
         if ok: self.run_task(self.keyboard_manager.search_fts, text)
-
     def cmd_file_upload(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select File to Push", "", 
@@ -1060,7 +1151,6 @@ class MainWindow(QMainWindow):
             self.log(f"[Error] Push failed: {str(e)}")
             self.btn_upload.setEnabled(True)
             self.btn_upload.setText("File Upload")
-
     def check_push_progress(self):
         progress_file = "resources/info/push_progress.txt"
         if not os.path.exists(progress_file):
@@ -1082,7 +1172,19 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-
+    #apple device 관련 버튼 액션
+    def cmd_apple_screenshot(self):
+        print("Apple Screenshot button clicked")
+        return 0
+    def cmd_apple_download_photos(self, date):
+        print("Apple Download Photos button clicked")
+        return 0
+    def cmd_apple_download_crash_dump(self, date):
+        print("Apple Download Crash Dump button clicked")
+        return 0
+    def cmd_apple_download_logs(self, date):
+        print("Apple Download Logs button clicked")
+        return 0
 
 class CustomInputDialog(QDialog):
     def __init__(self, parent=None, title="Title", label="Value:", value="", is_int=False):
