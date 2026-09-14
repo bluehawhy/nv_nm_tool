@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
 from ..core import func_logging
 from ..core import call_device
 
-from ..core import func_device, func_record
+from ..core import func_device, func_record, func_ios
 from ..utils import configus, loggas
 logging = loggas.logger
 
@@ -360,6 +360,7 @@ class MainWindow(QMainWindow):
         self.and_log_manager = None #AndroidLogManager 초기선언
         self.keyboard_manager = None #KeyboardController 초기선언
         self.aa_manager = None       #AndroidRecordManager 초기선언
+        self.ios_device_controller = None  # IOSDeviceController 초기선언
         self.device_type = None
         self.current_config = None
         self.is_scanning = False    # 기기 스캔 중 복수 실행 방지 플래그
@@ -698,6 +699,7 @@ class MainWindow(QMainWindow):
         if self.aa_manager is not None:
             self.aa_manager.stop() # 먼저 스레드 종료 후
         self.aa_manager = None #None으로 초기화
+        self.ios_device_controller = None
         
         self.version_found_flag = False
         if connection_lost:
@@ -1174,8 +1176,23 @@ class MainWindow(QMainWindow):
 
     #apple device 관련 버튼 액션
     def cmd_apple_screenshot(self):
-        print("Apple Screenshot button clicked")
-        return 0
+        """연결된 iOS 기기의 화면을 백그라운드에서 캡처합니다."""
+        if not self.device or self.device.get('detected_type') != 'Apple':
+            self.log("[Error] 연결된 Apple 기기가 없습니다.")
+            return
+
+        lockdown_device = self.device.get('lockdown_device')
+        if not lockdown_device:
+            self.log("[Error] iOS lockdown 연결 세션이 없습니다.")
+            return
+
+        if self.ios_device_controller is None:
+            self.ios_device_controller = func_ios.IOSDeviceController(
+                lockdown_device,
+                folder_path=self.current_config.get('local_path')
+            )
+
+        self.run_task(self.ios_device_controller.get_ios_screenshot_fixed)
     def cmd_apple_download_photos(self, date):
         print("Apple Download Photos button clicked")
         return 0
