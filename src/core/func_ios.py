@@ -18,7 +18,8 @@ from src.utils import loggas, configus
 
 logging = loggas.logger
 
-IOS_PHOTO_EXTENSIONS = {
+IOS_MEDIA_EXTENSIONS = {
+    # 사진
     ".jpg",
     ".jpeg",
     ".png",
@@ -29,6 +30,12 @@ IOS_PHOTO_EXTENSIONS = {
     ".tif",
     ".tiff",
     ".webp",
+    # 영상
+    ".mov",
+    ".mp4",
+    ".m4v",
+    ".avi",
+    ".3gp",
 }
 
 
@@ -217,7 +224,7 @@ class IOSDeviceController:
             print(f"❌ 필터 로그 다운로드 중 오류 발생: {e}")
 
     def download_photos_by_date(self, set_date_str=None, target_ext=None):
-        """특정 날짜의 사진을 다운로드합니다. target_ext가 없으면 모든 사진 확장자를 대상으로 합니다."""
+        """특정 날짜의 사진/영상을 다운로드합니다. target_ext가 없으면 모든 미디어 확장자를 대상으로 합니다."""
         try:
             asyncio.run(
                 self._download_photos_by_date_async(
@@ -226,7 +233,7 @@ class IOSDeviceController:
                 )
             )
         except Exception as e:
-            print(f"\n❌ 사진 필터링 복사 중 오류 발생: {e}")
+            print(f"\n❌ 사진/영상 필터링 복사 중 오류 발생: {e}")
 
 
     async def _download_photos_by_date_async(self, set_date_str=None, target_ext=None):
@@ -241,9 +248,9 @@ class IOSDeviceController:
             if not normalized_target_ext.startswith("."):
                 normalized_target_ext = f".{normalized_target_ext}"
 
-        extension_label = normalized_target_ext or "전체 사진"
+        extension_label = normalized_target_ext or "전체 사진/영상"
         print(
-            f"🚀 사진 필터링 다운로드 시작 "
+            f"🚀 사진/영상 필터링 다운로드 시작 "
             f"(날짜: {set_date_str}, 확장자: {extension_label})"
         )
 
@@ -290,7 +297,7 @@ class IOSDeviceController:
                 if target_ext:
                     if photo_ext != target_ext:
                         continue
-                elif photo_ext not in IOS_PHOTO_EXTENSIONS:
+                elif photo_ext not in IOS_MEDIA_EXTENSIONS:
                     continue
 
                 remote_path = f"{remote_sub_path}/{photo_name}"
@@ -307,7 +314,7 @@ class IOSDeviceController:
                         file_date = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
                     else:
                         logging.warning(
-                            f"사진 수정 시간을 확인할 수 없어 건너뜁니다: {remote_path}"
+                            f"미디어 수정 시간을 확인할 수 없어 건너뜁니다: {remote_path}"
                         )
                         continue
 
@@ -328,7 +335,7 @@ class IOSDeviceController:
                 await afc.pull(remote_path, str(local_path))
                 download_count += 1
 
-        print(f"\n✅ 필터링 기반 사진 다운로드 완료! ({download_count}개)")
+        print(f"\n✅ 필터링 기반 사진/영상 다운로드 완료! ({download_count}개)")
 
 
     def get_ios_screenshot(self):
