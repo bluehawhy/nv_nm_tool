@@ -93,7 +93,8 @@ def debug_mode():
     device = devices[0]
     ios_controller = func_ios.IOSDeviceController(device)
     #ios_controller.get_ios_screenshot()
-    ios_controller.download_photos_by_date("2026-09-14")
+    ios_controller.get_crash_logs("2026-09-14")
+    ios_controller.download_filtered_logs("2026-09-14")
 
 
 if __name__ == '__main__':
