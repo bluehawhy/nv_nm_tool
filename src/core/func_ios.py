@@ -304,58 +304,35 @@ class IOSDeviceController:
 
 
 
-
     def get_ios_screenshot(self):
-        """터널 데몬 프로세스를 구동하여 안전하게 iOS 기기 스크린샷을 확보합니다."""
-        current_dir = self.base_dir
-        current_dir.mkdir(parents=True, exist_ok=True)
-        
-        print("🚀 [1/3] 터널 프로세스 시작...")
-        
-        tunnel = subprocess.Popen(
-            ["pymobiledevice3", "remote", "tunneld"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True
+        """iOS 기기의 스크린샷을 저장합니다."""
+        self.base_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        save_path = self.base_dir / f"Screenshot_{timestamp}.png"
+
+        cmd = [
+            "pymobiledevice3",
+            "developer",
+            "dvt",
+            "screenshot",
+            str(save_path),
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
 
-        tunnel_ready = False
-        start_time = time.time()
-        while time.time() - start_time < 15:
-            line = tunnel.stdout.readline()
-            if not line: 
-                break
-            print(f"   [Tunnel Log] {line.strip()}")
-            if "Application startup complete" in line or "Uvicorn running" in line:
-                print("✅ 터널 서버가 준비되었습니다.")
-                tunnel_ready = True
-                time.sleep(2)
-                break
-        
-        if not tunnel_ready:
-            print("❌ 터널 생성에 실패했습니다.")
-            tunnel.terminate()
-            return
+        if result.returncode == 0 and save_path.exists():
+            print(
+                f"✅ 스크린샷 저장 완료: "
+                f"{save_path} ({save_path.stat().st_size} bytes)"
+            )
+            return save_path
 
-        try:
-            print("📸 [2/3] 스크린샷 촬영 시도...")
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"Screenshot_{timestamp}.png"
-            save_path = current_dir / filename
-            
-            cmd = ["pymobiledevice3", "developer", "dvt", "screenshot", str(save_path)]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-
-            if save_path.exists():
-                print(f"✅ [3/3] 물리 파일 생성 완료! ({save_path.stat().st_size} bytes)")
-            else:
-                print("❌ 스크린샷 파일 생성에 실패했습니다.")
-                print(f"🔍 디바이스 개발자 도구 세션 에러 로그:\n{result.stderr}")
-                
-        finally:
-            print("🛑 터널 프로세스 리소스를 해제합니다...")
-            tunnel.terminate()
-            try:
-                tunnel.wait(timeout=3)
-            except Exception:
-                tunnel.kill()
+        print("❌ 스크린샷 촬영에 실패했습니다.")
+        print(result.stderr or result.stdout)
+        return None
