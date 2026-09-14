@@ -222,7 +222,7 @@ class IOSDeviceController:
             asyncio.run(
                 self._download_photos_by_date_async(
                     set_date_str=set_date_str,
-                    target_ext=normalized_target_ext,
+                    target_ext=target_ext,
                 )
             )
         except Exception as e:
@@ -256,7 +256,7 @@ class IOSDeviceController:
                     afc=afc,
                     save_dir=save_dir,
                     set_date_str=set_date_str,
-                    target_ext=target_ext,
+                    target_ext=normalized_target_ext,
                 )
 
 
