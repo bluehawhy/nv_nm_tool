@@ -14,6 +14,7 @@ from src.core import (
     call_device,  
     func_logging,
     func_record,
+    func_ios,
 )
 
 # 3. UI 메인 윈도우 모듈 (ui)
@@ -81,9 +82,9 @@ def debug_mode():
     # call_device.start_adb_server()
     devices = call_device.discover_and_connect_device()
     device = devices[0]
-    log_manager = func_logging.AndroidLogManager(device=device)    
-    record_manager =func_record.AndroidRecordManager(device=device,log_manager=log_manager)
-    record_manager.record_video()
+    ios_controller = func_ios.IOSDeviceController(device)
+    #ios_controller.get_ios_screenshot()
+    ios_controller.download_photos_by_date("2026-09-14","jpg")
 
     
 def prod_mode():
@@ -96,6 +97,6 @@ def prod_mode():
 
 if __name__ == '__main__':
     loggas.set_debug_logging(True)
-    #debug_mode()
-    prod_mode()
+    debug_mode()
+    #prod_mode()
     
