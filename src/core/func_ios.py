@@ -18,10 +18,7 @@ from pymobiledevice3.remote.core_device.device_info import DeviceInfoService
 from pymobiledevice3.remote.core_device.screen_capture_service import (
     ScreenCaptureService,
 )
-from pymobiledevice3.tunneld.api import (
-    get_tunneld_device_by_udid,
-    get_tunneld_devices,
-)
+from pymobiledevice3.remote.rsd_tunnel import PreferredRsdTunnel
 
 from src.utils import loggas, configus
 
@@ -431,14 +428,14 @@ class IOSDeviceController:
         except Exception as e:
             print(
                 "⚠️ iOS 스크린샷 촬영 불가: "
-                "기기 연결과 tunneld 실행 상태를 확인해 주세요."
+                "기기 연결 상태를 확인해 주세요."
             )
             logging.debug(f"iOS 스크린샷 촬영 실패: {e}", exc_info=True)
             return None
 
 
     async def _get_ios_screenshot_async(self):
-        """실행 파일 호출 없이 pymobiledevice3 내부 API로 화면을 캡처합니다."""
+        """내장 userspace 터널과 CoreDevice API로 화면을 캡처합니다."""
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -450,24 +447,12 @@ class IOSDeviceController:
             None,
         )
 
-        rsd = None
-        try:
-            if serial:
-                rsd = await get_tunneld_device_by_udid(serial)
-            else:
-                rsd_devices = await get_tunneld_devices()
-                if rsd_devices:
-                    rsd = rsd_devices[0]
-                    for unused_rsd in rsd_devices[1:]:
-                        await unused_rsd.close()
-
-            if rsd is None:
-                print(
-                    "ℹ️ 활성 iOS 터널을 찾을 수 없어 "
-                    "스크린샷 촬영을 건너뜁니다."
-                )
-                return None
-
+        # Windows에서는 별도 tunneld 콘솔 없이 프로세스 내부 userspace
+        # 터널을 생성하고, 작업이 끝나면 자동으로 정리합니다.
+        async with PreferredRsdTunnel(
+            serial=serial,
+            prefer_native=False,
+        ) as rsd:
             carplay_unique_id = None
 
             try:
@@ -565,6 +550,3 @@ class IOSDeviceController:
             if carplay_path in capture_results:
                 return carplay_path
             return None
-        finally:
-            if rsd is not None:
-                await rsd.close()
