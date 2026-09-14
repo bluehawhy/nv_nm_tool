@@ -275,21 +275,44 @@ class IOSDeviceController:
         target_ext=None,
     ):
         remote_base = "/DCIM"
-        sub_dirs = [
-            item
-            for item in await afc.listdir(remote_base)
-            if item not in (".", "..")
-        ]
+        sub_dirs = []
+
+        for item in await afc.listdir(remote_base):
+            if item in (".", ".."):
+                continue
+
+            remote_item_path = f"{remote_base}/{item}"
+            try:
+                if await afc.isdir(remote_item_path):
+                    sub_dirs.append(item)
+                else:
+                    logging.debug(
+                        f"DCIM 최상위 파일은 폴더 순회 대상에서 제외합니다: "
+                        f"{remote_item_path}"
+                    )
+            except Exception as e:
+                logging.warning(
+                    f"DCIM 항목 확인 실패로 건너뜁니다: "
+                    f"{remote_item_path} ({e})"
+                )
 
         download_count = 0
 
         for sub_dir in sub_dirs:
             remote_sub_path = f"{remote_base}/{sub_dir}"
-            photos = [
-                item
-                for item in await afc.listdir(remote_sub_path)
-                if item not in (".", "..")
-            ]
+
+            try:
+                photos = [
+                    item
+                    for item in await afc.listdir(remote_sub_path)
+                    if item not in (".", "..")
+                ]
+            except Exception as e:
+                logging.warning(
+                    f"사진/영상 폴더를 읽을 수 없어 건너뜁니다: "
+                    f"{remote_sub_path} ({e})"
+                )
+                continue
 
             for photo_name in photos:
                 photo_ext = Path(photo_name).suffix.lower()
