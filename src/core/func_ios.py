@@ -176,16 +176,19 @@ class IOSDeviceController:
             async with CrashReportsManager(lockdown) as crash_manager:
                 print("📥 장치에서 전체 로그 데이터를 수집하는 중...")
 
-                # pull() 내부의 파일별 전송 INFO 로그만 작업 중 임시로 숨깁니다.
-                previous_level = crash_manager.logger.level
+                # pull() 중 발생하는 파일별 INFO와 무시 가능한 AFC WARNING을 숨깁니다.
+                crash_previous_level = crash_manager.logger.level
+                afc_previous_level = crash_manager.afc.logger.level
                 crash_manager.logger.setLevel(std_logging.WARNING)
+                crash_manager.afc.logger.setLevel(std_logging.ERROR)
                 try:
                     await crash_manager.pull(
                         str(temp_path),
                         progress_bar=False,
                     )
                 finally:
-                    crash_manager.logger.setLevel(previous_level)
+                    crash_manager.logger.setLevel(crash_previous_level)
+                    crash_manager.afc.logger.setLevel(afc_previous_level)
 
 
     def download_filtered_logs(
