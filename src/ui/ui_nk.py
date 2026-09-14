@@ -584,7 +584,10 @@ class MainWindow(QMainWindow):
 
         # 3. 백그라운드 스레드 정지 시그널 전달
         if self.log_stop_signal:
-            self.log_stop_signal.set()
+            if self.and_log_manager is not None:
+                self.and_log_manager.stop_live_logging()
+            else:
+                self.log_stop_signal.set()
             self.log_stop_signal = None
         
         if self.version_stop_signal:

@@ -102,9 +102,14 @@ class AndroidLogManager:
         # 스레드 통신용 이벤트 및 락
         self.stop_event = None
         self.lock = threading.Lock()
+        self._lifecycle_lock = threading.Lock()
+        self._log_thread = None
+        self._active_connection = None
 
-        # 🚀 [개편] 실시간 로그를 메모리에 유지할 링 버퍼 (최근 10,000줄 저장)
+        # 실시간 로그를 메모리에 유지할 링 버퍼 (최근 10,000줄 저장)
+        # deque 길이는 최대치에서 고정되므로 별도 증가 시퀀스로 신규 로그를 추적한다.
         self.recent_logs = deque(maxlen=10000)
+        self._log_sequence = 0
         
         # 🚀 [개편] 등록된 패턴 검색 작업 등록 리스트
         self.active_pattern_jobs = []
@@ -150,45 +155,110 @@ class AndroidLogManager:
         except Exception:
             self.overlap_lines = []
 
-    def start_live_logging(self, debounce_time=1.0, enable_filters =True):
+    def start_live_logging(self, debounce_time=1.0, enable_filters=True):
         self.enable_filters = enable_filters
+
+        with self._lifecycle_lock:
+            if self._log_thread is not None and self._log_thread.is_alive():
+                logging.info(f"[{self.serial}] 로그 수집 스레드가 이미 실행 중입니다.")
+                return self.stop_event
+
+            stop_event = threading.Event()
+            log_thread = threading.Thread(
+                target=self._live_log_worker,
+                args=(debounce_time, stop_event),
+                daemon=True,
+                name=f"AndroidLogWorker-{self.serial}",
+            )
+            self.stop_event = stop_event
+            self._log_thread = log_thread
 
         self._expand_log_buffer()
         self._update_paths()
-
-        self.stop_event = threading.Event()
-        log_thread = threading.Thread(
-            target=self._live_log_worker,
-            args=(debounce_time,),
-            daemon=True,
-        )
         log_thread.start()
 
         logging.info(f"[*] [{self.serial}] 단일 통합 소켓 로그 수집 시작")
-        return self.stop_event
+        return stop_event
 
     def stop_live_logging(self):
-        if self.stop_event is not None and not self.stop_event.is_set():
-            logging.info(f"[{self.serial}] 로그 수집 중지 요청 중...")
-            self.stop_event.set()
-            return True
-        return False
+        with self._lifecycle_lock:
+            stop_event = self.stop_event
+            connection = self._active_connection
+            log_thread = self._log_thread
 
-    def _live_log_worker(self, debounce_time):
+        if stop_event is None:
+            return False
+
+        stop_requested = not stop_event.is_set()
+        if stop_requested:
+            logging.info(f"[{self.serial}] 로그 수집 중지 요청 중...")
+            stop_event.set()
+
+        # connection.read()가 대기 중이어도 즉시 빠져나올 수 있도록 활성 소켓을 닫는다.
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception as e:
+                logging.debug(f"[{self.serial}] 활성 로그 소켓 종료 중 예외: {e}")
+
+        if (
+            log_thread is not None
+            and log_thread.is_alive()
+            and log_thread is not threading.current_thread()
+        ):
+            log_thread.join(timeout=2)
+            if log_thread.is_alive():
+                logging.warning(f"[{self.serial}] 로그 수집 스레드 종료 대기 시간 초과")
+
+        return stop_requested
+
+    def _live_log_worker(self, debounce_time, stop_event):
+        retry_delay = 0.5
+
         try:
-            while not self.stop_event.is_set():
-                self.device_obj.shell(
-                    "logcat -v threadtime", 
-                    handler=lambda conn: self._live_log_stream_handler(conn, debounce_time)
-                )
-                
-                if self.stop_event.is_set():
+            while not stop_event.is_set():
+                stream_state = {"reason": "error"}
+
+                def stream_handler(connection):
+                    stream_state["reason"] = self._live_log_stream_handler(
+                        connection,
+                        debounce_time,
+                        stop_event,
+                    )
+
+                try:
+                    self.device_obj.shell(
+                        "logcat -v threadtime",
+                        handler=stream_handler,
+                    )
+                except Exception as e:
+                    if not stop_event.is_set():
+                        logging.error(f"[{self.serial}] 로그 수집 워커 에러: {e}")
+                    stream_state["reason"] = "error"
+
+                reason = stream_state["reason"]
+
+                if stop_event.is_set() or reason == "stopped":
                     break
-                    
-                logging.info(f"[{self.serial}] 로그 파일 교체 및 수집 재시작...")
-        except Exception as e:
-            logging.error(f"[{self.serial}] 로그 수집 워커 에러: {e}")
+
+                if reason == "rotate":
+                    retry_delay = 0.5
+                    logging.info(f"[{self.serial}] 로그 파일 교체 후 수집을 계속합니다.")
+                    continue
+
+                logging.warning(
+                    f"[{self.serial}] 로그 스트림 종료({reason}). "
+                    f"{retry_delay:.1f}초 후 재연결합니다."
+                )
+                if stop_event.wait(retry_delay):
+                    break
+                retry_delay = min(retry_delay * 2, 5.0)
         finally:
+            with self._lifecycle_lock:
+                if self._log_thread is threading.current_thread():
+                    self._log_thread = None
+                self._active_connection = None
+
             logging.info(f"[{self.serial}] 로그 수집 쓰레드 최종 종료")
 
     # 🚀 [신규 메서드] 스크린샷 캡처를 별도 스레드에서 수행
@@ -212,7 +282,7 @@ class AndroidLogManager:
                 f"스크린샷 캡처 중 오류 발생: {e}"
             )
 
-    def _live_log_stream_handler(self, connection, debounce_time):
+    def _live_log_stream_handler(self, connection, debounce_time, stop_event):
         enable_filters = getattr(self, "enable_filters", True)
 
         is_snapshot_enabled = self.config.get('snapshop_log', False)
@@ -224,6 +294,18 @@ class AndroidLogManager:
             and len(filter_keywords) > 0
         )
 
+        reason = "stopped"
+        file_opened = False
+
+        with self._lifecycle_lock:
+            if stop_event.is_set() or stop_event is not self.stop_event:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+                return "stopped"
+            self._active_connection = connection
+
         try:
             with ExitStack() as stack:
                 f = stack.enter_context(
@@ -234,6 +316,7 @@ class AndroidLogManager:
                         buffering=1024 * 1024
                     )
                 )
+                file_opened = True
 
                 f_filter = None
                 if is_filter_active:
@@ -252,12 +335,12 @@ class AndroidLogManager:
                     f.writelines(self.overlap_lines)
                     f.write("=" * 50 + "\n\n")
 
-                while not self.stop_event.is_set():
-
+                while not stop_event.is_set():
                     chunk = connection.read(8192)
 
                     if not chunk:
-                        return
+                        reason = "eof"
+                        break
 
                     text = chunk.decode("utf-8", errors="replace")
                     f.write(text)
@@ -269,8 +352,9 @@ class AndroidLogManager:
 
                         # 1. 최근 로그
                         with self.lock:
+                            self._log_sequence += 1
                             self.recent_logs.append(
-                                (time.time(), clean_line)
+                                (self._log_sequence, time.time(), clean_line)
                             )
 
                         # 2. 최신 위치 로그는 즉시 갱신
@@ -322,7 +406,6 @@ class AndroidLogManager:
                                         exist_ok=True
                                     )
 
-                                    # ⭐ 핵심: 스크린샷을 별도 스레드에서 실행
                                     threading.Thread(
                                         target=self._take_screenshot,
                                         args=(target_save_dir,),
@@ -336,19 +419,37 @@ class AndroidLogManager:
                         self.current_log_path
                     ) > 100 * 1024 * 1024:
                         f.flush()
+                        reason = "rotate"
                         break
 
-            self._update_overlap_context()
-            self.file_count += 1
-            self._update_paths()
+                if stop_event.is_set():
+                    reason = "stopped"
 
         except Exception as e:
-            logging.error(
-                f"[{self.serial}] 핸들러 실행 중 오류: {e}"
-            )
+            reason = "stopped" if stop_event.is_set() else "error"
+            if reason == "error":
+                logging.error(
+                    f"[{self.serial}] 핸들러 실행 중 오류: {e}"
+                )
 
         finally:
-            connection.close()
+            try:
+                connection.close()
+            except Exception as e:
+                logging.debug(f"[{self.serial}] 로그 소켓 종료 중 예외: {e}")
+
+            with self._lifecycle_lock:
+                if self._active_connection is connection:
+                    self._active_connection = None
+
+            # EOF/예외/정상 종료 모두 현재 파일을 먼저 마감한다.
+            # 다음 연결은 반드시 새로운 파일 경로를 사용하므로 기존 로그가 보존된다.
+            if file_opened:
+                self._update_overlap_context()
+                self.file_count += 1
+                self._update_paths()
+
+        return reason
 
     # 🚀 [신규 메서드] 패턴 모니터링 내부 처리기
     def _process_pattern_jobs(self, line):
@@ -419,7 +520,12 @@ class AndroidLogManager:
 
         # 1. 과거 로그 추출 (메모리 링 버퍼 조회)
         with self.lock:
-            past_logs = [line for t, line in self.recent_logs if t >= start_threshold]
+            past_logs = [
+                (sequence, line)
+                for sequence, timestamp, line in self.recent_logs
+                if timestamp >= start_threshold
+            ]
+            last_sequence = self._log_sequence
 
         try:
             with open(file_path, "w", encoding="utf-8") as f, \
@@ -429,7 +535,7 @@ class AndroidLogManager:
                     f_filter.write(f"=== Log Filter Active: {log_filter} ===\n\n")
 
                 # 과거 로그 쓰기
-                for line in past_logs:
+                for _, line in past_logs:
                     f.write(line + "\n")
                     if is_filter_active:
                         if any(word.upper() in line.upper() for word in log_filter):
@@ -442,19 +548,19 @@ class AndroidLogManager:
 
                 # 2. 미래 duration_sec 동안 실시간 로깅 관찰
                 end_time = time.time() + duration_sec
-                last_idx = len(self.recent_logs)
 
                 while time.time() < end_time:
                     time.sleep(0.1)
                     with self.lock:
-                        current_len = len(self.recent_logs)
-                        if current_len > last_idx:
-                            new_items = list(self.recent_logs)[last_idx:current_len]
-                            last_idx = current_len
-                        else:
-                            new_items = []
+                        new_items = [
+                            item
+                            for item in self.recent_logs
+                            if item[0] > last_sequence
+                        ]
+                        if new_items:
+                            last_sequence = new_items[-1][0]
 
-                    for _, line in new_items:
+                    for _, _, line in new_items:
                         f.write(line + "\n")
                         if is_filter_active:
                             if any(word.upper() in line.upper() for word in log_filter):
