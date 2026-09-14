@@ -119,7 +119,7 @@ class IOSDeviceController:
                 return file_count
 
             local_file_path = local_base_path / item_name
-            print(f"📥 파일 다운로드 중: {remote_path}")
+            print(f"파일 다운로드 중: {remote_path}")
             await afc.pull(
                 remote_path,
                 str(local_file_path),
@@ -151,7 +151,7 @@ class IOSDeviceController:
         final_dir = self.base_dir / "IOS" / set_date_str / "crash_logs"
         final_dir.mkdir(parents=True, exist_ok=True)
 
-        print(f"🚀 [{set_date_str}] 크래시 로그 추출을 시작합니다.")
+        print(f"[{set_date_str}] 크래시 로그 추출을 시작합니다.")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -159,7 +159,7 @@ class IOSDeviceController:
             try:
                 asyncio.run(self._pull_crash_logs_async(temp_path))
             except Exception as e:
-                print(f"❌ 크래시 로그 추출 중 오류 발생: {e}")
+                print(f"크래시 로그 추출 중 오류 발생: {e}")
                 return
 
             count = 0
@@ -190,7 +190,7 @@ class IOSDeviceController:
 
         async with await create_using_usbmux(serial=serial) as lockdown:
             async with CrashReportsManager(lockdown) as crash_manager:
-                print("📥 장치에서 전체 로그 데이터를 수집하는 중...")
+                print("장치에서 전체 로그 데이터를 수집하는 중...")
 
                 # pull() 중 발생하는 파일별 INFO와 무시 가능한 AFC WARNING을 숨깁니다.
                 crash_previous_level = crash_manager.logger.level
@@ -438,7 +438,7 @@ class IOSDeviceController:
             return asyncio.run(self._get_ios_screenshot_async())
         except Exception as e:
             print(
-                "⚠️ iOS 스크린샷 촬영 불가: "
+                "iOS 스크린샷 촬영 불가: "
                 "기기 또는 터널 연결 상태를 확인해 주세요."
             )
             logging.debug(f"iOS 스크린샷 촬영 실패: {e}", exc_info=True)
@@ -499,12 +499,12 @@ class IOSDeviceController:
                     ) or carplay_display.get("displayUniqueID")
                 else:
                     print(
-                        "ℹ️ 활성 CarPlay 디스플레이가 없어 "
+                        "ℹ활성 CarPlay 디스플레이가 없어 "
                         "iPhone 화면만 촬영합니다."
                     )
             except Exception as e:
                 print(
-                    "ℹ️ CarPlay 디스플레이를 조회하지 못해 "
+                    "ℹCarPlay 디스플레이를 조회하지 못해 "
                     "iPhone 화면만 촬영합니다."
                 )
                 logging.debug(
@@ -525,12 +525,12 @@ class IOSDeviceController:
 
                     output_path.write_bytes(image_data)
                     print(
-                        f"✅ {display_name} 스크린샷 저장 완료: "
+                        f"{display_name} 스크린샷 저장 완료: "
                         f"{output_path} ({output_path.stat().st_size} bytes)"
                     )
                     return output_path
                 except Exception as e:
-                    print(f"⚠️ {display_name} 스크린샷 촬영에 실패했습니다.")
+                    print(f"{display_name} 스크린샷 촬영에 실패했습니다.")
                     logging.debug(
                         f"{display_name} 스크린샷 촬영 실패: {e}",
                         exc_info=True,
