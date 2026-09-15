@@ -472,6 +472,20 @@ class IOSDeviceController:
         return "Apple 기기"
 
 
+    def _get_os_major_version(self):
+        """lockdown 정보에서 iOS/iPadOS 주 버전을 안전하게 반환합니다."""
+        all_values = getattr(self.lockdown, "all_values", {}) or {}
+        product_version = (
+            all_values.get("ProductVersion")
+            or getattr(self.lockdown, "product_version", "")
+            or str(self.device.get("product", "")).replace("iOS", "").strip()
+        )
+        try:
+            return int(str(product_version).split(".", 1)[0])
+        except (TypeError, ValueError):
+            return None
+
+
     async def _get_ios_screenshot_async(self):
         """내장 터널을 우선 사용하고 실행 중인 tunneld로 폴백합니다."""
         self.base_dir.mkdir(parents=True, exist_ok=True)
@@ -485,9 +499,19 @@ class IOSDeviceController:
             None,
         )
         device_display_name = self._get_device_display_name()
+        os_major_version = self._get_os_major_version()
 
         async def capture_primary_with_lockdown():
             """RSD 캡처 실패 시 USB lockdown screenshotr 서비스로 재시도합니다."""
+            # screenshotr는 최신 OS에서 제거된 구형 개발자 서비스입니다.
+            # 호출하면 InvalidService와 미회수 Future 경고까지 발생하므로 생략합니다.
+            if os_major_version is not None and os_major_version >= 17:
+                print(
+                    f"ℹ{device_display_name}OS {os_major_version}에서는 구형 USB "
+                    "스크린샷 서비스를 지원하지 않아 해당 재시도를 생략합니다."
+                )
+                return None
+
             try:
                 # 장치 검색 단계에서 만든 lockdown 객체는 이전 이벤트 루프에
                 # 연결돼 있으므로 현재 루프에서 같은 UDID의 세션을 새로 엽니다.
@@ -549,6 +573,12 @@ class IOSDeviceController:
             )
             has_core_screenshot = (
                 ScreenCaptureService.SERVICE_NAME in rsd_services
+            )
+            has_dvt_screenshot = DvtProvider.RSD_SERVICE_NAME in rsd_services
+            logging.info(
+                "Apple 스크린샷 서비스 확인: "
+                f"CoreDevice={has_core_screenshot}, DVT={has_dvt_screenshot}, "
+                f"OS={getattr(rsd, 'product_version', 'Unknown')}"
             )
 
             # iPad는 CarPlay 대상이 아니므로 외부 디스플레이 조회 자체를 생략합니다.
@@ -660,9 +690,15 @@ class IOSDeviceController:
 
             if save_path in capture_results:
                 return save_path
-            dvt_path = await capture_primary_with_dvt(rsd)
-            if dvt_path:
-                return dvt_path
+            if has_dvt_screenshot:
+                dvt_path = await capture_primary_with_dvt(rsd)
+                if dvt_path:
+                    return dvt_path
+            else:
+                print(
+                    f"{device_display_name}에서 DVT 스크린샷 서비스도 "
+                    "제공되지 않습니다."
+                )
             primary_fallback_path = await capture_primary_with_lockdown()
             if primary_fallback_path:
                 return primary_fallback_path
