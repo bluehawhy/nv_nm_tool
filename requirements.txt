@@ -1,5 +1,5 @@
 pandas==3.0.5
-pymobiledevice3==11.1.6
+pymobiledevice3==11.12.5
 pyproj==3.7.2
 PyQt6==6.11.0
 pyqt6_sip==13.11.1
