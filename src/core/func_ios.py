@@ -102,6 +102,18 @@ class IOSDeviceController:
         self.log_dir = self.base_dir / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
+        # iPhone 연결 시 CarPlay 디스플레이 ID를 한 번만 조회해 캐시합니다.
+        # 연결 해제 시 IOSDeviceController 자체가 폐기되므로 별도 초기화는 필요 없습니다.
+        self.carplay_unique_id = None
+        if self._get_device_display_name() == "iPhone":
+            try:
+                asyncio.run(self._load_carplay_display_unique_id_async())
+            except Exception as e:
+                logging.debug(
+                    f"CarPlay 디스플레이 초기 조회 실패: {e}",
+                    exc_info=True,
+                )
+
 
     async def _pull_recursive(self, afc, remote_path, local_base_path):
         """AFC 경로를 재귀적으로 다운로드하고 저장한 파일 수를 반환합니다."""
@@ -486,6 +498,103 @@ class IOSDeviceController:
             return None
 
 
+    async def _cache_carplay_display_unique_id(self, rsd):
+        """현재 활성화된 CarPlay 디스플레이 ID를 컨트롤러에 캐시합니다."""
+        async with DeviceInfoService(rsd) as device_info_service:
+            display_info = await device_info_service.get_display_info()
+
+        active_external_displays = []
+        for display in display_info.get("displays", []):
+            if not display.get("external"):
+                continue
+
+            unique_id = display.get("uniqueId") or display.get(
+                "displayUniqueID"
+            )
+            size = display.get("currentMode", {}).get("size", [0, 0])
+
+            if (
+                unique_id
+                and isinstance(size, (list, tuple))
+                and len(size) >= 2
+                and size[0] > 0
+                and size[1] > 0
+            ):
+                active_external_displays.append(display)
+
+        if not active_external_displays:
+            print("ℹ활성 CarPlay 디스플레이가 없습니다.")
+            return None
+
+        active_external_displays.sort(
+            key=lambda display: (
+                not str(
+                    display.get("deviceName", "")
+                ).lower().startswith("wireless"),
+                str(display.get("deviceName", "")),
+            )
+        )
+        carplay_display = active_external_displays[0]
+        self.carplay_unique_id = carplay_display.get(
+            "uniqueId"
+        ) or carplay_display.get("displayUniqueID")
+        print(
+            "CarPlay 디스플레이 확인 완료: "
+            f"{self.carplay_unique_id}"
+        )
+        return self.carplay_unique_id
+
+
+    async def _load_carplay_display_unique_id_async(self):
+        """컨트롤러 생성 시 CarPlay 디스플레이 ID를 한 번만 조회합니다."""
+        serial = self.device.get("serial") or getattr(
+            self.lockdown,
+            "identifier",
+            None,
+        )
+
+        if UserspaceRsdTunnel is not None:
+            try:
+                async with UserspaceRsdTunnel(
+                    serial=serial,
+                    autopair=True,
+                ) as rsd:
+                    return await self._cache_carplay_display_unique_id(rsd)
+            except Exception as e:
+                logging.debug(
+                    f"CarPlay 초기 조회용 내장 터널 연결 실패: {e}",
+                    exc_info=True,
+                )
+        elif USERSPACE_TUNNEL_IMPORT_ERROR is not None:
+            logging.debug(
+                "CarPlay 초기 조회용 내장 터널 로드 실패: "
+                f"{USERSPACE_TUNNEL_IMPORT_ERROR}"
+            )
+
+        rsd = None
+        try:
+            if serial:
+                rsd = await get_tunneld_device_by_udid(serial)
+            else:
+                rsd_devices = await get_tunneld_devices()
+                if rsd_devices:
+                    rsd = rsd_devices[0]
+                    for unused_rsd in rsd_devices[1:]:
+                        await unused_rsd.close()
+
+            if rsd is None:
+                print(
+                    "ℹCarPlay 디스플레이 초기 조회에 사용할 "
+                    "RSD 연결을 찾을 수 없습니다."
+                )
+                return None
+
+            return await self._cache_carplay_display_unique_id(rsd)
+        finally:
+            if rsd is not None:
+                await rsd.close()
+
+
     async def _get_ios_screenshot_async(self):
         """내장 터널을 우선 사용하고 실행 중인 tunneld로 폴백합니다."""
         self.base_dir.mkdir(parents=True, exist_ok=True)
@@ -567,7 +676,7 @@ class IOSDeviceController:
                 return None
 
         async def capture_with_rsd(rsd):
-            carplay_unique_id = None
+            carplay_unique_id = self.carplay_unique_id
             rsd_services = (
                 (getattr(rsd, "peer_info", None) or {}).get("Services", {})
             )
@@ -580,59 +689,6 @@ class IOSDeviceController:
                 f"CoreDevice={has_core_screenshot}, DVT={has_dvt_screenshot}, "
                 f"OS={getattr(rsd, 'product_version', 'Unknown')}"
             )
-
-            # iPad는 CarPlay 대상이 아니므로 외부 디스플레이 조회 자체를 생략합니다.
-            if device_display_name == "iPhone":
-                try:
-                    async with DeviceInfoService(rsd) as device_info_service:
-                        display_info = await device_info_service.get_display_info()
-
-                    active_external_displays = []
-                    for display in display_info.get("displays", []):
-                        if not display.get("external"):
-                            continue
-
-                        unique_id = display.get("uniqueId") or display.get(
-                            "displayUniqueID"
-                        )
-                        size = display.get("currentMode", {}).get("size", [0, 0])
-
-                        if (
-                            unique_id
-                            and isinstance(size, (list, tuple))
-                            and len(size) >= 2
-                            and size[0] > 0
-                            and size[1] > 0
-                        ):
-                            active_external_displays.append(display)
-
-                    if active_external_displays:
-                        active_external_displays.sort(
-                            key=lambda display: (
-                                not str(
-                                    display.get("deviceName", "")
-                                ).lower().startswith("wireless"),
-                                str(display.get("deviceName", "")),
-                            )
-                        )
-                        carplay_display = active_external_displays[0]
-                        carplay_unique_id = carplay_display.get(
-                            "uniqueId"
-                        ) or carplay_display.get("displayUniqueID")
-                    else:
-                        print(
-                            "ℹ활성 CarPlay 디스플레이가 없어 "
-                            f"{device_display_name} 화면만 촬영합니다."
-                        )
-                except Exception as e:
-                    print(
-                        "ℹCarPlay 디스플레이를 조회하지 못해 "
-                        f"{device_display_name} 화면만 촬영합니다."
-                    )
-                    logging.debug(
-                        f"CarPlay 디스플레이 조회 실패: {e}",
-                        exc_info=True,
-                    )
 
             async def capture_screen(display_name, output_path, unique_id):
                 try:
