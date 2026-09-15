@@ -15,6 +15,10 @@ from pymobiledevice3.services.crash_reports import CrashReportsManager
 from pymobiledevice3.services.house_arrest import HouseArrestService
 from pymobiledevice3.services.installation_proxy import InstallationProxyService
 from pymobiledevice3.services.screenshot import ScreenshotService
+from pymobiledevice3.services.dvt.instruments.dvt_provider import DvtProvider
+from pymobiledevice3.services.dvt.instruments.screenshot import (
+    Screenshot as DvtScreenshot,
+)
 from pymobiledevice3.remote.core_device.device_info import DeviceInfoService
 from pymobiledevice3.remote.core_device.screen_capture_service import (
     ScreenCaptureService,
@@ -511,8 +515,41 @@ class IOSDeviceController:
                 )
                 return None
 
+        async def capture_primary_with_dvt(rsd):
+            """CoreDevice 캡처가 없는 최신 iPadOS에서 DVT로 촬영합니다."""
+            try:
+                async with DvtProvider(rsd) as dvt_provider:
+                    async with DvtScreenshot(dvt_provider) as screenshot:
+                        image_data = await screenshot.get_screenshot()
+
+                if not image_data:
+                    raise ValueError("DVT 스크린샷 이미지 데이터가 없습니다.")
+
+                save_path.write_bytes(image_data)
+                print(
+                    f"{device_display_name} DVT 스크린샷 저장 완료: "
+                    f"{save_path} ({save_path.stat().st_size} bytes)"
+                )
+                return save_path
+            except Exception as e:
+                print(
+                    f"{device_display_name} DVT 스크린샷 촬영 실패: "
+                    f"{type(e).__name__}: {e}"
+                )
+                logging.error(
+                    f"{device_display_name} DVT 스크린샷 촬영 실패: {e}",
+                    exc_info=True,
+                )
+                return None
+
         async def capture_with_rsd(rsd):
             carplay_unique_id = None
+            rsd_services = (
+                (getattr(rsd, "peer_info", None) or {}).get("Services", {})
+            )
+            has_core_screenshot = (
+                ScreenCaptureService.SERVICE_NAME in rsd_services
+            )
 
             # iPad는 CarPlay 대상이 아니므로 외부 디스플레이 조회 자체를 생략합니다.
             if device_display_name == "iPhone":
@@ -595,10 +632,18 @@ class IOSDeviceController:
                     )
                     return None
 
-            capture_tasks = [
-                capture_screen(device_display_name, save_path, None),
-            ]
-            if carplay_unique_id:
+            capture_tasks = []
+            if has_core_screenshot:
+                capture_tasks.append(
+                    capture_screen(device_display_name, save_path, None)
+                )
+            else:
+                print(
+                    f"ℹ{device_display_name}OS {getattr(rsd, 'product_version', '')}에서 "
+                    "CoreDevice 스크린샷 서비스를 제공하지 않아 DVT 방식으로 시도합니다."
+                )
+
+            if carplay_unique_id and has_core_screenshot:
                 capture_tasks.append(
                     capture_screen(
                         "CarPlay",
@@ -607,10 +652,17 @@ class IOSDeviceController:
                     )
                 )
 
-            capture_results = await asyncio.gather(*capture_tasks)
+            capture_results = (
+                await asyncio.gather(*capture_tasks)
+                if capture_tasks
+                else []
+            )
 
             if save_path in capture_results:
                 return save_path
+            dvt_path = await capture_primary_with_dvt(rsd)
+            if dvt_path:
+                return dvt_path
             primary_fallback_path = await capture_primary_with_lockdown()
             if primary_fallback_path:
                 return primary_fallback_path
