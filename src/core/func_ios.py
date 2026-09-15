@@ -708,14 +708,31 @@ class IOSDeviceController:
                     )
                     return output_path
                 except Exception as e:
-                    print(
-                        f"{display_name} RSD 스크린샷 촬영 실패: "
-                        f"{type(e).__name__}: {e}"
-                    )
-                    logging.error(
-                        f"{display_name} 스크린샷 촬영 실패: {e}",
-                        exc_info=True,
-                    )
+                    if (
+                        display_name == "CarPlay"
+                        and unique_id
+                        and unique_id == self.carplay_unique_id
+                    ):
+                        # 연결 중 디스플레이가 바뀌어 캐시된 ID가 무효가 된 경우,
+                        # 본체 캡처는 유지하고 이후 CarPlay 재시도만 중단합니다.
+                        self.carplay_unique_id = None
+                        print(
+                            "ℹCarPlay 디스플레이 ID가 변경되었거나 "
+                            "더 이상 유효하지 않아 iPhone 화면만 저장합니다."
+                        )
+                        logging.warning(
+                            "캐시된 CarPlay 디스플레이 ID 무효화: "
+                            f"{unique_id} ({type(e).__name__}: {e})"
+                        )
+                    else:
+                        print(
+                            f"{display_name} RSD 스크린샷 촬영 실패: "
+                            f"{type(e).__name__}: {e}"
+                        )
+                        logging.error(
+                            f"{display_name} 스크린샷 촬영 실패: {e}",
+                            exc_info=True,
+                        )
                     return None
 
             capture_tasks = []
