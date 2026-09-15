@@ -12,6 +12,13 @@ from collections import deque
 
 logging = loggas.logger
 
+# logcat 소켓은 임의의 바이트 경계에서 잘릴 수 있으므로 완성된 로그 줄에서만
+# 위치를 판별한다. win 번호/공백/대소문자는 기기 및 빌드별 차이를 허용한다.
+CAR_POS_PATTERN = re.compile(
+    r"\bwin\s+\d+\s+SFN\b.*?\bpos\s+-?\d+\s+-?\d+\b",
+    re.IGNORECASE,
+)
+
 # ================================== load config data ==================================
 class ScreenshotFilterMatcher:
     """
@@ -296,6 +303,7 @@ class AndroidLogManager:
 
         reason = "stopped"
         file_opened = False
+        line_buffer = ""
 
         with self._lifecycle_lock:
             if stop_event.is_set() or stop_event is not self.stop_event:
@@ -345,10 +353,15 @@ class AndroidLogManager:
                     text = chunk.decode("utf-8", errors="replace")
                     f.write(text)
 
-                    lines = text.splitlines(keepends=True)
+                    # connection.read()는 로그 한 줄의 중간에서 끊길 수 있다.
+                    # 이전 청크의 꼬리를 보관했다가 개행을 받은 뒤 완성된 줄만 처리한다.
+                    line_buffer += text
+                    complete_lines = line_buffer.split("\n")
+                    line_buffer = complete_lines.pop()
 
-                    for line in lines:
-                        clean_line = line.rstrip("\r\n")
+                    for raw_line in complete_lines:
+                        clean_line = raw_line.rstrip("\r")
+                        line = raw_line + "\n"
 
                         # 1. 최근 로그
                         with self.lock:
@@ -358,7 +371,7 @@ class AndroidLogManager:
                             )
 
                         # 2. 최신 위치 로그는 즉시 갱신
-                        if "win 0 SFN" in clean_line:
+                        if CAR_POS_PATTERN.search(clean_line):
                             pc_time = datetime.now().strftime(
                                 "%H:%M:%S.%f"
                             )[:-3]
