@@ -523,7 +523,7 @@ class IOSDeviceController:
                 active_external_displays.append(display)
 
         if not active_external_displays:
-            print("ℹ활성 CarPlay 디스플레이가 없습니다.")
+            print("활성 CarPlay 디스플레이가 없습니다.")
             return None
 
         active_external_displays.sort(
@@ -584,7 +584,7 @@ class IOSDeviceController:
 
             if rsd is None:
                 print(
-                    "ℹCarPlay 디스플레이 초기 조회에 사용할 "
+                    "CarPlay 디스플레이 초기 조회에 사용할 "
                     "RSD 연결을 찾을 수 없습니다."
                 )
                 return None
@@ -634,7 +634,7 @@ class IOSDeviceController:
                 save_path.write_bytes(image_data)
                 print(
                     f"{device_display_name} 스크린샷 저장 완료: "
-                    f"{save_path} ({save_path.stat().st_size} bytes)"
+                    f"{save_path}"
                 )
                 return save_path
             except Exception as e:
@@ -660,8 +660,8 @@ class IOSDeviceController:
 
                 save_path.write_bytes(image_data)
                 print(
-                    f"{device_display_name} DVT 스크린샷 저장 완료: "
-                    f"{save_path} ({save_path.stat().st_size} bytes)"
+                    f"{device_display_name} 스크린샷 저장 완료: "
+                    f"{save_path}"
                 )
                 return save_path
             except Exception as e:
@@ -704,7 +704,7 @@ class IOSDeviceController:
                     output_path.write_bytes(image_data)
                     print(
                         f"{display_name} 스크린샷 저장 완료: "
-                        f"{output_path} ({output_path.stat().st_size} bytes)"
+                        f"{output_path}"
                     )
                     return output_path
                 except Exception as e:
@@ -716,14 +716,8 @@ class IOSDeviceController:
                         # 연결 중 디스플레이가 바뀌어 캐시된 ID가 무효가 된 경우,
                         # 본체 캡처는 유지하고 이후 CarPlay 재시도만 중단합니다.
                         self.carplay_unique_id = None
-                        print(
-                            "ℹCarPlay 디스플레이 ID가 변경되었거나 "
-                            "더 이상 유효하지 않아 iPhone 화면만 저장합니다."
-                        )
-                        logging.warning(
-                            "캐시된 CarPlay 디스플레이 ID 무효화: "
-                            f"{unique_id} ({type(e).__name__}: {e})"
-                        )
+                        print("CarPlay 디스플레이 ID가 변경되었거나 더 이상 유효하지 않아 iPhone 화면만 저장합니다.")
+                        logging.warning(f"캐시된 CarPlay 디스플레이 ID 무효화: {unique_id} ({type(e).__name__}: {e})")
                     else:
                         print(
                             f"{display_name} RSD 스크린샷 촬영 실패: "
@@ -741,10 +735,7 @@ class IOSDeviceController:
                     capture_screen(device_display_name, save_path, None)
                 )
             else:
-                print(
-                    f"ℹ{device_display_name}OS {getattr(rsd, 'product_version', '')}에서 "
-                    "CoreDevice 스크린샷 서비스를 제공하지 않아 DVT 방식으로 시도합니다."
-                )
+                print(f"{device_display_name}OS {getattr(rsd, 'product_version', '')} || CoreDevice -> DVT 변경")
 
             if carplay_unique_id and has_core_screenshot:
                 capture_tasks.append(
