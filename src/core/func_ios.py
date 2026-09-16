@@ -165,7 +165,7 @@ class IOSDeviceController:
 
     def get_crash_logs(self, set_date_str):
         """특정 일자(YYYY-MM-DD)의 crash log(.ips)만 저장합니다."""
-        final_dir = self.base_dir / "IOS" / set_date_str / "crash_logs"
+        final_dir = self.base_dir / set_date_str / "crash_logs"
         final_dir.mkdir(parents=True, exist_ok=True)
 
         print(f"[{set_date_str}] 크래시 로그 추출을 시작합니다.")
@@ -230,7 +230,7 @@ class IOSDeviceController:
         bundle_id="hmi.navis.NMaps",
     ):
         """특정일(YYYY-MM-DD)의 bundle_id 로그만 다운로드합니다."""
-        local_root = self.base_dir / "IOS" / set_date_str / "ios_app_logs"
+        local_root = self.base_dir / set_date_str / "ios_app_logs"
         local_root.mkdir(parents=True, exist_ok=True)
 
         print(f"📅 필터링 기준 앱 ID: {bundle_id}")
@@ -359,7 +359,7 @@ class IOSDeviceController:
     async def _download_photos_by_date_async(self, set_date_str=None, target_ext=None):
         """pymobiledevice3 비동기 AFC API를 사용하여 사진을 다운로드합니다."""
         folder_suffix = set_date_str if set_date_str else "filtered"
-        save_dir = self.base_dir / "IOS" / folder_suffix / "ios_pic"
+        save_dir = self.base_dir / folder_suffix / "ios_pic"
         save_dir.mkdir(parents=True, exist_ok=True)
 
         normalized_target_ext = None
