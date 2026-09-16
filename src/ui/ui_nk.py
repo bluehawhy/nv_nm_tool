@@ -673,7 +673,14 @@ class MainWindow(QMainWindow):
 
     def disconnect_device(self, connection_lost=False):
         """모든 연결 및 로깅 작업을 종료하고 연결 상태를 UI에 반영합니다."""
-        self.log("Disconnecting device...")
+        disconnected_device = self.device or {}
+        device_model = disconnected_device.get('model', 'Unknown Device')
+        device_serial = disconnected_device.get('serial', 'Unknown Serial')
+        device_type = disconnected_device.get('detected_type', 'Unknown')
+        device_description = f"{device_model} / {device_serial} / {device_type}"
+
+        self.log(f"Disconnecting device: {device_description}")
+        logging.info(f"기기 연결 해제 시작: {device_description}")
 
         # 1. 헬스 체크 타이머 정지 (안전한 hasattr 검사 사용)
         if hasattr(self, 'timer_device_check') and self.timer_device_check is not None:
@@ -728,9 +735,13 @@ class MainWindow(QMainWindow):
         # 6. 연결 해제 시 스택 위젯을 빈 화면(Blank)으로 전환
         self.control_stack.setCurrentIndex(0)
         if connection_lost:
-            self.log("Device connection lost.")
+            message = f"기기 연결이 끊어져 해제했습니다: {device_description}"
+            self.log(message)
+            logging.warning(message)
         else:
-            self.log("Device disconnected successfully.")
+            message = f"이 기기 연결을 해제했습니다: {device_description}"
+            self.log(message)
+            logging.info(message)
 
     def connect_selected_device(self):
         """기기 연결 및 기기 타입별 뷰 포트 스위칭 로직"""

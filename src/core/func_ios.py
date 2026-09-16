@@ -307,15 +307,53 @@ class IOSDeviceController:
 
     def download_photos_by_date(self, set_date_str=None, target_ext=None):
         """특정 날짜의 사진/영상을 다운로드합니다. target_ext가 없으면 모든 미디어 확장자를 대상으로 합니다."""
+        started_at = time.monotonic()
         try:
-            asyncio.run(
+            download_count = asyncio.run(
                 self._download_photos_by_date_async(
                     set_date_str=set_date_str,
                     target_ext=target_ext,
                 )
             )
         except Exception as e:
-            print(f"\n❌ 사진/영상 필터링 복사 중 오류 발생: {e}")
+            elapsed = time.monotonic() - started_at
+            print(
+                f"\n❌ 사진/영상 복사 실패 ({elapsed:.1f}초): "
+                f"{type(e).__name__}: {e}"
+            )
+            logging.exception(
+                f"사진/영상 복사 실패 ({elapsed:.1f}초, "
+                f"날짜={set_date_str}, 확장자={target_ext})"
+            )
+            return None
+
+        elapsed = time.monotonic() - started_at
+        print(
+            f"✅ 사진/영상 복사 작업 종료: {download_count}개 "
+            f"({elapsed:.1f}초)"
+        )
+        logging.info(
+            f"사진/영상 복사 작업 종료: {download_count}개, {elapsed:.1f}초"
+        )
+        return download_count
+
+
+    async def _await_photo_operation(self, awaitable, description, interval=15):
+        """오래 걸리는 AFC 작업이 멈춘 것처럼 보이지 않도록 주기적으로 상태를 출력합니다."""
+        task = asyncio.ensure_future(awaitable)
+        started_at = time.monotonic()
+
+        while not task.done():
+            done, _ = await asyncio.wait({task}, timeout=interval)
+            if task in done:
+                break
+
+            elapsed = time.monotonic() - started_at
+            message = f"⏳ {description} 계속 진행 중... ({elapsed:.0f}초 경과)"
+            print(message)
+            logging.info(message)
+
+        return await task
 
 
     async def _download_photos_by_date_async(self, set_date_str=None, target_ext=None):
@@ -335,13 +373,27 @@ class IOSDeviceController:
             f"🚀 사진/영상 필터링 다운로드 시작 "
             f"(날짜: {set_date_str}, 확장자: {extension_label})"
         )
+        logging.info(
+            f"사진/영상 다운로드 시작: 날짜={set_date_str}, "
+            f"확장자={extension_label}, 저장경로={save_dir}"
+        )
 
         # 기존 lockdown은 장치 검색용 asyncio.run()에서 생성되었으므로,
         # 현재 작업의 이벤트 루프에서 같은 장치로 새 세션을 엽니다.
         serial = self.device.get("serial") or getattr(self.lockdown, "identifier", None)
+        print(f"[사진 복사 1/3] iOS 연결 확인 중: {serial}")
+        logging.info(f"사진 복사용 lockdown 연결 시작: {serial}")
         async with await create_using_usbmux(serial=serial) as lockdown:
+            print(
+                "[사진 복사 1/3] iOS 연결 확인 완료 "
+                f"(신뢰 상태: {getattr(lockdown, 'paired', False)})"
+            )
+            print("[사진 복사 2/3] AFC 사진 서비스 연결 중...")
+            logging.info("사진 복사용 AFC 서비스 연결 시작")
             async with AfcService(lockdown) as afc:
-                await self._download_photos_from_afc(
+                print("[사진 복사 2/3] AFC 사진 서비스 연결 완료")
+                logging.info("사진 복사용 AFC 서비스 연결 완료")
+                return await self._download_photos_from_afc(
                     afc=afc,
                     save_dir=save_dir,
                     set_date_str=set_date_str,
@@ -359,7 +411,15 @@ class IOSDeviceController:
         remote_base = "/DCIM"
         sub_dirs = []
 
-        for item in await afc.listdir(remote_base):
+        print(f"[사진 복사 3/3] {remote_base} 폴더 목록 조회 시작")
+        logging.info(f"AFC 폴더 목록 조회 시작: {remote_base}")
+        dcim_items = await self._await_photo_operation(
+            afc.listdir(remote_base),
+            f"{remote_base} 폴더 목록 조회",
+        )
+        print(f"[사진 복사 3/3] {remote_base} 항목 {len(dcim_items)}개 확인")
+
+        for item in dcim_items:
             if item in (".", ".."):
                 continue
 
@@ -379,36 +439,77 @@ class IOSDeviceController:
                 )
 
         download_count = 0
+        skipped_count = 0
+        failed_count = 0
+        scanned_count = 0
+        print(f"사진 폴더 {len(sub_dirs)}개 검색 시작: {', '.join(sub_dirs)}")
+        logging.info(f"AFC 사진 폴더 검색 시작: {sub_dirs}")
 
-        for sub_dir in sub_dirs:
+        for folder_index, sub_dir in enumerate(sub_dirs, start=1):
             remote_sub_path = f"{remote_base}/{sub_dir}"
 
             try:
+                print(
+                    f"[{folder_index}/{len(sub_dirs)}] "
+                    f"폴더 목록 조회 중: {remote_sub_path}"
+                )
                 photos = [
                     item
-                    for item in await afc.listdir(remote_sub_path)
+                    for item in await self._await_photo_operation(
+                        afc.listdir(remote_sub_path),
+                        f"{remote_sub_path} 목록 조회",
+                    )
                     if item not in (".", "..")
                 ]
+                print(
+                    f"[{folder_index}/{len(sub_dirs)}] "
+                    f"{remote_sub_path}: {len(photos)}개 항목 확인"
+                )
             except Exception as e:
+                failed_count += 1
+                print(
+                    f"⚠️ 사진/영상 폴더 조회 실패: {remote_sub_path} "
+                    f"({type(e).__name__}: {e})"
+                )
                 logging.warning(
                     f"사진/영상 폴더를 읽을 수 없어 건너뜁니다: "
-                    f"{remote_sub_path} ({e})"
+                    f"{remote_sub_path} ({e})",
+                    exc_info=True,
                 )
                 continue
 
             for photo_name in photos:
+                scanned_count += 1
                 photo_ext = Path(photo_name).suffix.lower()
 
                 if target_ext:
                     if photo_ext != target_ext:
+                        skipped_count += 1
                         continue
                 elif photo_ext not in IOS_MEDIA_EXTENSIONS:
+                    skipped_count += 1
                     continue
 
                 remote_path = f"{remote_sub_path}/{photo_name}"
+                info = None
 
                 if set_date_str:
-                    info = await afc.stat(remote_path)
+                    try:
+                        info = await self._await_photo_operation(
+                            afc.stat(remote_path),
+                            f"파일 정보 조회: {remote_path}",
+                        )
+                    except Exception as e:
+                        failed_count += 1
+                        print(
+                            f"⚠️ 파일 정보 조회 실패, 건너뜀: {remote_path} "
+                            f"({type(e).__name__}: {e})"
+                        )
+                        logging.warning(
+                            f"미디어 파일 정보 조회 실패: {remote_path} ({e})",
+                            exc_info=True,
+                        )
+                        continue
 
                     # 생성일만 기준으로 날짜를 판정합니다.
                     birth_time = info.get("st_birthtime")
@@ -424,29 +525,72 @@ class IOSDeviceController:
                         )
                         file_date = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
                     else:
+                        skipped_count += 1
                         logging.warning(
                             f"미디어 생성 시간을 확인할 수 없어 건너뜁니다: {remote_path}"
                         )
                         continue
 
                     if file_date != set_date_str:
+                        skipped_count += 1
                         continue
                 else:
                     file_date = sub_dir
 
                 local_path = save_dir / photo_name
                 if local_path.exists() and local_path.stat().st_size > 0:
+                    skipped_count += 1
                     continue
 
-                print(
-                    f"📥 [{file_date}] {photo_name} 다운로드 중...",
-                    end="\r",
-                    flush=True,
-                )
-                await afc.pull(remote_path, str(local_path))
-                download_count += 1
+                temp_path = local_path.with_name(f"{local_path.name}.part")
+                if temp_path.exists():
+                    temp_path.unlink()
 
-        print(f"\n✅ 필터링 기반 사진/영상 다운로드 완료! ({download_count}개)")
+                remote_size = info.get("st_size") if isinstance(info, dict) else None
+                size_text = f", 원본 크기={remote_size} bytes" if remote_size is not None else ""
+                file_started_at = time.monotonic()
+                print(f"📥 [{file_date}] 다운로드 시작: {remote_path}{size_text}")
+                logging.info(
+                    f"미디어 다운로드 시작: {remote_path} -> {local_path}{size_text}"
+                )
+
+                try:
+                    await self._await_photo_operation(
+                        afc.pull(remote_path, str(temp_path)),
+                        f"파일 다운로드: {remote_path}",
+                    )
+                    temp_path.replace(local_path)
+                    download_count += 1
+                    file_elapsed = time.monotonic() - file_started_at
+                    local_size = local_path.stat().st_size
+                    print(
+                        f"✅ 다운로드 완료: {photo_name} "
+                        f"({local_size} bytes, {file_elapsed:.1f}초)"
+                    )
+                    logging.info(
+                        f"미디어 다운로드 완료: {remote_path}, "
+                        f"{local_size} bytes, {file_elapsed:.1f}초"
+                    )
+                except Exception as e:
+                    failed_count += 1
+                    if temp_path.exists():
+                        temp_path.unlink()
+                    print(
+                        f"❌ 다운로드 실패: {remote_path} "
+                        f"({type(e).__name__}: {e})"
+                    )
+                    logging.exception(f"미디어 다운로드 실패: {remote_path}")
+
+        print(
+            f"\n✅ 필터링 기반 사진/영상 다운로드 완료! "
+            f"(검색 {scanned_count}개 / 저장 {download_count}개 / "
+            f"건너뜀 {skipped_count}개 / 실패 {failed_count}개)"
+        )
+        logging.info(
+            f"사진/영상 다운로드 요약: 검색={scanned_count}, 저장={download_count}, "
+            f"건너뜀={skipped_count}, 실패={failed_count}"
+        )
+        return download_count
 
 
     def get_ios_screenshot(self):

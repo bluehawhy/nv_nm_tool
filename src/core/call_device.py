@@ -5,7 +5,13 @@ import time
 import asyncio
 
 from ppadb.client import Client as AdbClient
-from pymobiledevice3.exceptions import NoDeviceConnectedError
+from pymobiledevice3.exceptions import (
+    FatalPairingError,
+    NoDeviceConnectedError,
+    PairingDialogResponsePendingError,
+    PasswordRequiredError,
+    UserDeniedPairingError,
+)
 from pymobiledevice3.lockdown import create_using_usbmux
 import serial
 import serial.tools.list_ports
@@ -234,17 +240,29 @@ def is_device_connected(device):
 
         # 2. Apple (iOS 장비)
         elif dev_type == 'Apple':
-            # pymobiledevice3 usbmuxd 연결 상태 빠르게 재점검
-            lockdown = asyncio.run(create_using_usbmux())
-            if not lockdown:
-                return False
-            
-            # UDID/Identifier 일치 여부 확인
-            current_identifier = getattr(lockdown, 'identifier', None)
-            if target_serial and target_serial != 'Unknown UDID':
-                return current_identifier == target_serial
-            
-            return True
+            async def check_apple_connection():
+                lockdown = None
+                try:
+                    # 헬스 체크에서 신뢰 팝업을 다시 띄우거나 무한 대기하지 않습니다.
+                    lockdown = await create_using_usbmux(
+                        serial=(
+                            target_serial
+                            if target_serial and target_serial != 'Unknown UDID'
+                            else None
+                        ),
+                        autopair=False,
+                    )
+                    current_identifier = getattr(lockdown, 'identifier', None)
+                    if not getattr(lockdown, 'paired', False):
+                        return False
+                    if target_serial and target_serial != 'Unknown UDID':
+                        return current_identifier == target_serial
+                    return True
+                finally:
+                    if lockdown is not None:
+                        await lockdown.close()
+
+            return asyncio.run(check_apple_connection())
 
         return False
 
@@ -359,10 +377,9 @@ class AppleConnector:
 
         devices = []
         try:
-            # USB를 통한 Usbmuxd 원격 락다운 확인
-            lockdown = asyncio.run(create_using_usbmux())
+            lockdown = asyncio.run(self._connect_with_trust_check())
             if lockdown:
-                print('connected to iOS')
+                print('✅ iOS 기기 연결 및 신뢰 확인 완료')
                 apple_info = {
                     'detected_type': 'Apple',
                     'ppadb_device': None,
@@ -373,10 +390,47 @@ class AppleConnector:
                 devices.append(apple_info)
         except NoDeviceConnectedError:
             print("[WARN] 연결된 iOS 장치를 찾을 수 없습니다. USB 케이블을 확인하세요.")
+        except PasswordRequiredError:
+            print("[WARN] 아이폰 잠금을 해제한 후 다시 연결해 주세요.")
+            logging.warning("iOS 연결 실패: 기기 잠금 해제가 필요합니다.")
+        except UserDeniedPairingError:
+            print("[WARN] 아이폰에서 '신뢰하지 않음'을 선택했습니다. 다시 연결해 주세요.")
+            logging.warning("iOS 연결 실패: 사용자가 컴퓨터 신뢰 요청을 거부했습니다.")
+        except PairingDialogResponsePendingError:
+            print("[WARN] 아이폰의 '이 컴퓨터를 신뢰' 응답을 60초 동안 받지 못했습니다.")
+            logging.warning("iOS 연결 실패: 신뢰 팝업 응답 시간 초과")
+        except FatalPairingError:
+            print("[WARN] 아이폰 신뢰 등록 후 연결 검증에 실패했습니다. 케이블을 다시 연결해 주세요.")
+            logging.exception("iOS 연결 실패: 페어링 검증 실패")
         except Exception as e:
-            logging.error(f"iOS 상세 연결 오류: {e}")
+            print(f"[ERROR] iOS 연결 중 오류 발생: {type(e).__name__}: {e}")
+            logging.exception(f"iOS 상세 연결 오류: {e}")
             
         return devices
+
+    async def _connect_with_trust_check(self):
+        """기존 신뢰 여부를 먼저 확인하고 필요한 경우에만 신뢰 요청을 진행합니다."""
+        lockdown = await create_using_usbmux(autopair=False)
+        identifier = getattr(lockdown, 'identifier', None)
+
+        if getattr(lockdown, 'paired', False):
+            logging.info(f"iOS 신뢰 상태 확인 완료: 이미 신뢰된 기기 ({identifier})")
+            return lockdown
+
+        print(
+            "[Apple] 아이폰 잠금을 해제하고 화면의 "
+            "'이 컴퓨터를 신뢰' 버튼을 눌러주세요. (대기시간 60초)"
+        )
+        logging.info(f"iOS 신뢰 요청 대기 시작: {identifier}")
+
+        await lockdown.close()
+        trusted_lockdown = await create_using_usbmux(
+            serial=identifier,
+            autopair=True,
+            pair_timeout=60,
+        )
+        logging.info(f"iOS 신뢰 등록 완료: {identifier}")
+        return trusted_lockdown
 
 
 # --- [ 최종 메인 오케스트레이션 함수 ] ---
@@ -452,5 +506,4 @@ class WorkerThread(threading.Thread):
             res = device.shell(f"{self.command}")
             print(f"[{self.serial}] 작업 중: {res.strip()}")
             time.sleep(2)
-
 
