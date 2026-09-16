@@ -131,7 +131,12 @@ class AndroidRecordManager:
 
         except Exception as e:
 
-            logging.error(
+            log_method = (
+                logging.debug
+                if self._stop_event.is_set()
+                else logging.error
+            )
+            log_method(
                 f"[ANDROID AUTO] "
                 f"Display search failed: {e}"
             )
@@ -148,7 +153,10 @@ class AndroidRecordManager:
 
     def _refresh_loop(self):
         """
-        refresh_interval 주기로 Android Auto Display ID 검색
+        시작 직후 및 refresh_interval 주기로 Android Auto Display ID를 검색합니다.
+
+        ADB shell 호출이 지연되더라도 이 루프는 백그라운드 스레드에서만
+        실행되므로 기기 전환 중 UI 이벤트 루프를 막지 않습니다.
         """
 
         logging.info(
@@ -157,29 +165,30 @@ class AndroidRecordManager:
             f"(interval={self.refresh_interval}s)"
         )
 
-        while not self._stop_event.wait(self.refresh_interval):
-            self.find_display_id()
+        try:
+            while not self._stop_event.is_set():
+                self.find_display_id()
 
-        logging.info(
-            "[ANDROID AUTO] "
-            "Display monitor stopped"
-        )
+                if self._stop_event.wait(self.refresh_interval):
+                    break
+        finally:
+            logging.info(
+                "[ANDROID AUTO] "
+                "Display monitor stopped"
+            )
 
     def start(self):
         """
         Android Auto Display ID 감시 시작
 
-        시작 즉시 한 번 검색하고,
-        이후 refresh_interval 주기로 갱신
+        최초 검색부터 모니터 스레드에서 수행해, 끊어진 ADB 소켓의
+        타임아웃이 발생해도 PyQt UI 스레드가 멈추지 않게 합니다.
         """
 
         if self._thread and self._thread.is_alive():
             return
 
         self._stop_event.clear()
-
-        # 시작 즉시 Display 검색
-        self.find_display_id()
 
         self._thread = threading.Thread(
             target=self._refresh_loop,
@@ -196,13 +205,18 @@ class AndroidRecordManager:
 
         self._stop_event.set()
 
-        if self._thread and self._thread.is_alive():
+        thread = self._thread
+        if (
+            thread
+            and thread.is_alive()
+            and thread is not threading.current_thread()
+        ):
+            # pure-python-adb의 shell 호출 자체는 즉시 취소할 수 없습니다.
+            # UI 해제 흐름에서는 짧게만 기다리고, 진행 중인 호출은 반환 즉시
+            # _stop_event를 확인한 뒤 모니터 루프를 종료하게 둡니다.
+            thread.join(timeout=0.2)
 
-            self._thread.join(
-                timeout=2
-            )
-
-        if self._thread and not self._thread.is_alive():
+        if thread and not thread.is_alive():
             self._thread = None
 
     # =========================================================
