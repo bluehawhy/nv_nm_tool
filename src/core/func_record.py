@@ -485,6 +485,56 @@ class AndroidRecordManager:
     # =========================================================
     # Video Recording
     # =========================================================
+    @staticmethod
+    def _check_screenrecord_result(result):
+        """screenrecord가 shell 출력으로만 전달한 실패를 예외로 변환합니다."""
+        text = (result or "").strip()
+        lowered = text.lower()
+        error_markers = (
+            "error:",
+            "failed",
+            "unable to",
+            "could not",
+            "aborted",
+            "fatal",
+            "permission denied",
+            "no space left",
+            "no such file",
+            "not found",
+            "usage: screenrecord",
+            "encoder failed",
+        )
+        if any(marker in lowered for marker in error_markers):
+            raise RuntimeError(text)
+        return text
+
+    def _get_screenrecord_pids(self):
+        """실행 중인 screenrecord PID를 반환합니다."""
+        result = self.device_obj.shell("pidof screenrecord")
+        return re.findall(r"\b\d+\b", result or "")
+
+    def _stop_screenrecord(self, signal_number=2):
+        """PID 기반으로 screenrecord를 종료하고, pidof 미지원 기기는 pkill로 폴백합니다."""
+        pids = self._get_screenrecord_pids()
+        if pids:
+            for pid in pids:
+                result = self.device_obj.shell(
+                    f"kill -{int(signal_number)} {pid}"
+                )
+                if result and result.strip():
+                    logging.debug(
+                        f"screenrecord PID {pid} 종료 결과: {result.strip()}"
+                    )
+            return pids
+
+        # 구형 장치 등에서 pidof가 없거나 결과를 주지 않는 경우의 폴백입니다.
+        result = self.device_obj.shell(
+            f"pkill -{int(signal_number)} screenrecord"
+        )
+        if result and result.strip():
+            logging.debug(f"screenrecord pkill 결과: {result.strip()}")
+        return []
+
     def _read_android_auto_raw(self, file_path, validate_only=False):
         with open(file_path, "rb") as file:
             data = file.read()
@@ -793,6 +843,8 @@ class AndroidRecordManager:
             "error": None,
         }
         main_record_error = []
+        main_record_result = []
+        main_video_created = False
         aa_video_created = False
         remote_frames_pulled = False
 
@@ -800,10 +852,18 @@ class AndroidRecordManager:
             f"[*] 비디오 녹화 시작 "
             f"(기기: {device_obj_serial}, 시간: {duration}초)"
         )
+        print(
+            f"[VIDEO] 녹화 시작: 기기={device_obj_serial}, "
+            f"시간={duration}초, 저장경로={local_dir}"
+        )
 
         try:
-            self.device_obj.shell(f"mkdir -p {remote_video_dir}")
-            self.device_obj.shell("pkill -2 screenrecord")
+            mkdir_result = self.device_obj.shell(f"mkdir -p {remote_video_dir}")
+            self._check_capture_result(mkdir_result)
+
+            # 같은 파일명 또는 비정상 종료된 이전 파일의 영향을 제거합니다.
+            self.device_obj.shell(f"rm -f {remote_video_path}")
+            self._stop_screenrecord(signal_number=9)
             time.sleep(0.5)
 
             self._save_location_txt(
@@ -813,12 +873,30 @@ class AndroidRecordManager:
 
             def record_main_display():
                 try:
-                    self.device_obj.shell(
-                        f"screenrecord {remote_video_path}"
+                    # 종료 신호가 전달되지 않아도 장치가 스스로 파일을 마무리하도록
+                    # screenrecord의 공식 time-limit을 함께 지정합니다.
+                    record_limit = max(1, min(180, math.ceil(duration) + 1))
+                    command = (
+                        f"screenrecord --time-limit {record_limit} "
+                        f"{remote_video_path}"
                     )
+                    logging.info(
+                        f"[{device_obj_serial}] 기본 화면 녹화 명령: {command}"
+                    )
+                    print(
+                        f"[VIDEO] 기본 화면 녹화 시작: {remote_video_path} "
+                        f"(자동 종료 {record_limit}초)"
+                    )
+                    result = self.device_obj.shell(command)
+                    main_record_result.append(result or "")
+                    self._check_screenrecord_result(result)
                 except Exception as e:
                     main_record_error.append(e)
-                    logging.error(
+                    print(
+                        f"[VIDEO][ERROR] 기본 화면 녹화 실패: "
+                        f"{type(e).__name__}: {e}"
+                    )
+                    logging.exception(
                         f"[{device_obj_serial}] "
                         f"기본 화면 녹화 실패: {e}"
                     )
@@ -829,6 +907,19 @@ class AndroidRecordManager:
                 name="MainDisplayRecorder"
             )
             main_thread.start()
+
+            # 시작 직후 종료되는 경우 명령 오류를 빠르게 표시합니다.
+            time.sleep(0.75)
+            if not main_thread.is_alive() and main_record_error:
+                raise RuntimeError(
+                    f"기본 화면 녹화 시작 실패: {main_record_error[0]}"
+                )
+
+            running_pids = self._get_screenrecord_pids()
+            logging.info(
+                f"[{device_obj_serial}] screenrecord 실행 PID: "
+                f"{running_pids or '확인 불가'}"
+            )
 
             aa_thread = None
             if display_id:
@@ -852,13 +943,19 @@ class AndroidRecordManager:
                 )
 
             # 두 촬영은 각 스레드에서 동시에 진행된다.
-            time.sleep(duration)
+            remaining_duration = max(0.0, duration - 0.75)
+            time.sleep(remaining_duration)
 
             logging.info(
                 f"[{device_obj_serial}] 기본 화면 녹화 종료 중..."
             )
-            self.device_obj.shell("pkill -2 screenrecord")
-            main_thread.join(timeout=5)
+            print("[VIDEO] 기본 화면 녹화 종료 및 MP4 저장 중...")
+            stopped_pids = self._stop_screenrecord(signal_number=2)
+            logging.info(
+                f"[{device_obj_serial}] 종료 신호 전달 PID: "
+                f"{stopped_pids or '이미 종료됨/확인 불가'}"
+            )
+            main_thread.join(timeout=10)
 
             if aa_thread:
                 # 진행 중인 마지막 screencap이 끝날 때까지 기다린다.
@@ -876,12 +973,60 @@ class AndroidRecordManager:
                     raise RuntimeError("기본 화면 녹화가 아직 종료되지 않았습니다.")
                 if main_record_error:
                     raise RuntimeError(str(main_record_error[0]))
+
+                if main_record_result:
+                    result_text = main_record_result[0].strip()
+                    if result_text:
+                        logging.info(
+                            f"[{device_obj_serial}] screenrecord 출력: {result_text}"
+                        )
+
+                remote_size_result = self.device_obj.shell(
+                    f"if [ -s {remote_video_path} ]; then "
+                    f"wc -c < {remote_video_path}; "
+                    "else echo __MISSING_OR_EMPTY__; fi"
+                ).strip()
+                if "__MISSING_OR_EMPTY__" in remote_size_result:
+                    raise RuntimeError(
+                        f"기기에서 녹화 파일이 생성되지 않았거나 비어 있습니다: "
+                        f"{remote_video_path}"
+                    )
+                if not re.fullmatch(r"\d+", remote_size_result):
+                    raise RuntimeError(
+                        "기기 녹화 파일 크기를 확인할 수 없습니다: "
+                        f"{remote_size_result or '응답 없음'}"
+                    )
+                logging.info(
+                    f"[{device_obj_serial}] 기기 녹화 파일 확인: "
+                    f"{remote_video_path}, size={remote_size_result} bytes"
+                )
+                print(
+                    f"[VIDEO] 기기 녹화 파일 확인 완료: "
+                    f"{remote_size_result} bytes"
+                )
+
+                print(f"[VIDEO] PC로 영상 복사 중: {local_video_path}")
                 self.device_obj.pull(remote_video_path, local_video_path)
                 if not os.path.isfile(local_video_path) or os.path.getsize(local_video_path) == 0:
                     raise RuntimeError("기본 화면 영상 Pull에 실패했습니다.")
-                logging.info(f"기본 화면 영상 저장 완료: {local_video_path}")
+                local_video_size = os.path.getsize(local_video_path)
+                main_video_created = True
+                self.device_obj.shell(f"rm -f {remote_video_path}")
+                print(
+                    f"[VIDEO] 기본 화면 영상 저장 완료: {local_video_path} "
+                    f"({local_video_size} bytes)"
+                )
+                logging.info(
+                    f"기본 화면 영상 저장 완료: {local_video_path} "
+                    f"({local_video_size} bytes)"
+                )
             except Exception as error:
-                logging.error(f"기본 화면 영상 처리 실패: {error}")
+                main_record_error.append(error)
+                print(
+                    f"[VIDEO][ERROR] 기본 화면 영상 처리 실패: "
+                    f"{type(error).__name__}: {error}"
+                )
+                logging.exception(f"기본 화면 영상 처리 실패: {error}")
 
             # Android Auto 프레임은 촬영이 모두 끝난 뒤 Pull한다.
             if display_id:
@@ -926,9 +1071,20 @@ class AndroidRecordManager:
                     f"output={android_auto_fps}fps)"
                 )
 
+            if not main_video_created and not aa_video_created:
+                if main_record_error:
+                    raise RuntimeError(
+                        f"생성된 영상이 없습니다: {main_record_error[-1]}"
+                    )
+                raise RuntimeError("생성된 영상이 없습니다.")
+
 
         except Exception as e:
-            logging.error(
+            print(
+                f"[VIDEO][ERROR] 비디오 작업 실패: "
+                f"{type(e).__name__}: {e}"
+            )
+            logging.exception(
                 f"[{device_obj_serial}] 비디오 태스크 에러: {e}"
             )
 
@@ -963,4 +1119,8 @@ class AndroidRecordManager:
 
             logging.info(
                 f"[{device_obj_serial}] 비디오 작업 완료"
+            )
+            print(
+                f"[VIDEO] 작업 종료: 기본화면={'성공' if main_video_created else '실패'}, "
+                f"Android Auto={'성공' if aa_video_created else ('건너뜀' if not display_id else '실패')}"
             )
