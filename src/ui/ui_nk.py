@@ -810,8 +810,8 @@ class MainWindow(QMainWindow):
         
         self.title_label.setText(f"{self.version} - Connected: {dev_type_str}")
         device_description = (
-            f"{selected_device.get('model', 'Unknown Device')} / "
-            f"{selected_device.get('serial', 'Unknown Serial')} / {dev_type_str}"
+            f"{self.device.get('model', 'Unknown Device')} / "
+            f"{self.device.get('serial', 'Unknown Serial')} / {dev_type_str}"
         )
         self.log(f"Connecting device: {device_description}")
 
