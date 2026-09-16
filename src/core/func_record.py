@@ -31,7 +31,8 @@ class AndroidRecordManager:
         self,
         device,
         log_manager=None,
-        refresh_interval=60
+        refresh_interval=60,
+        folder_path=None,
     ):
         self.device = device
         self.device_obj = device['ppadb_device']
@@ -40,6 +41,7 @@ class AndroidRecordManager:
         self.config = configus.load_config(
             'resources/configs/config.json'
         )
+        self.folder_path = folder_path or self.config['local_path']
 
         # Android Auto Virtual Display ID
         self.display_id = None
@@ -419,7 +421,7 @@ class AndroidRecordManager:
         screenshot_file = (f"Screenshot_{timestamp}.png")
         screenshot_file_aa = (f"Screenshot_{timestamp}_android_auto.png")
         car_pos_file = (f"Screenshot_{timestamp}_location.txt")
-        local_dir = (save_dir if save_dir else self.config['local_path'])
+        local_dir = (save_dir if save_dir else self.folder_path)
         os.makedirs(local_dir, exist_ok=True)
         screenshot_path = os.path.join(local_dir,screenshot_file)
         screenshot_path_aa = os.path.join(local_dir,screenshot_file_aa)
@@ -808,7 +810,7 @@ class AndroidRecordManager:
         now = datetime.now()
         timestamp = now.strftime("%Y%m%d_%H%M%S")       # 최종 파일명
         temp_timestamp = now.strftime("%Y%m%d_%H%M%S_%f")  # 임시 폴더
-        local_dir = save_dir if save_dir else self.config['local_path']
+        local_dir = save_dir if save_dir else self.folder_path
         os.makedirs(local_dir, exist_ok=True)
 
         video_file = f"Screen_Recording_{timestamp}.mp4"
