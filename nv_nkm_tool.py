@@ -65,7 +65,8 @@ revision_list=[
     'v0.84 (2026-09-09) : android auto video record function add, video record time setable in UI',
     'v0.841 (2026-09-10) : bug fix - screenshot file name.',
     'v0.842 (2026-09-10) : scroll butter logic change',
-    'v1.0 (2026-09-04) : IOS function add - screenshot, log, crash dump',
+    'v1.0 (2026-09-14) : IOS function add - screenshot, log, crash dump',
+    'v1.1 (2026-09-16) : bug fix and make folder for each device',
     ]
 
 
