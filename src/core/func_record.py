@@ -619,6 +619,13 @@ class AndroidRecordManager:
                 f"mkdir -p {remote_frame_dir}"
             )
 
+            message = (
+                "[VIDEO][ANDROID AUTO] 프레임 촬영 시작: "
+                f"display={display_id}, target={target_fps}fps"
+            )
+            print(message)
+            logging.info(message)
+
             while time.perf_counter() - started_at < duration:
                 frame_started_at = time.perf_counter()
                 frame_index = len(captured_frames)
@@ -654,6 +661,13 @@ class AndroidRecordManager:
 
             result_data["frames"] = captured_frames
             result_data["elapsed"] = time.perf_counter() - started_at
+            message = (
+                "[VIDEO][ANDROID AUTO] 프레임 촬영 완료: "
+                f"{len(captured_frames)}개, "
+                f"{result_data['elapsed']:.1f}초"
+            )
+            print(message)
+            logging.info(message)
 
         except Exception as e:
             result_data["error"] = e
@@ -672,8 +686,19 @@ class AndroidRecordManager:
         """촬영이 끝난 Android Auto 프레임을 PC로 복사한다."""
 
         os.makedirs(local_frame_dir, exist_ok=True)
+        total_frames = len(frames)
+        transferred_bytes = 0
+        pull_started_at = time.perf_counter()
+        progress_interval = max(1, total_frames // 10)
 
-        for frame_info in frames:
+        message = (
+            "[VIDEO][ANDROID AUTO] 프레임 PC 복사 시작: "
+            f"총 {total_frames}개"
+        )
+        print(message)
+        logging.info(message)
+
+        for frame_index, frame_info in enumerate(frames, start=1):
             local_path = os.path.join(
                 local_frame_dir,
                 frame_info["name"]
@@ -694,6 +719,33 @@ class AndroidRecordManager:
             self._read_android_auto_raw(local_path, validate_only=True)
 
             frame_info["local_path"] = local_path
+            transferred_bytes += os.path.getsize(local_path)
+
+            if (
+                frame_index == 1
+                or frame_index == total_frames
+                or frame_index % progress_interval == 0
+            ):
+                elapsed = time.perf_counter() - pull_started_at
+                progress = frame_index / total_frames * 100
+                transferred_mb = transferred_bytes / (1024 * 1024)
+                message = (
+                    "[VIDEO][ANDROID AUTO] 프레임 복사 중: "
+                    f"{frame_index}/{total_frames} ({progress:.0f}%), "
+                    f"{transferred_mb:.1f}MB, {elapsed:.1f}초"
+                )
+                print(message)
+                logging.info(message)
+
+        elapsed = time.perf_counter() - pull_started_at
+        message = (
+            "[VIDEO][ANDROID AUTO] 프레임 PC 복사 완료: "
+            f"{total_frames}개, "
+            f"{transferred_bytes / (1024 * 1024):.1f}MB, "
+            f"{elapsed:.1f}초"
+        )
+        print(message)
+        logging.info(message)
 
 
     def _create_android_auto_video(
@@ -714,6 +766,7 @@ class AndroidRecordManager:
 
         rate = Fraction(str(output_fps)).limit_denominator(1000)
         output_frame_count = max(1, round(duration * output_fps))
+        progress_interval = max(1, output_frame_count // 10)
 
 
         first_array = self._read_android_auto_raw(
@@ -777,6 +830,21 @@ class AndroidRecordManager:
 
                 for packet in stream.encode(video_frame):
                     container.mux(packet)
+
+                completed_count = output_index + 1
+                if (
+                    completed_count == 1
+                    or completed_count == output_frame_count
+                    or completed_count % progress_interval == 0
+                ):
+                    progress = completed_count / output_frame_count * 100
+                    message = (
+                        "[VIDEO][ANDROID AUTO] 영상 제작 중: "
+                        f"{completed_count}/{output_frame_count} "
+                        f"({progress:.0f}%)"
+                    )
+                    print(message)
+                    logging.info(message)
 
             for packet in stream.encode():
                 container.mux(packet)
@@ -1055,6 +1123,14 @@ class AndroidRecordManager:
                     "[ANDROID AUTO VIDEO] 기기 내부 프레임 삭제 완료"
                 )
 
+                print(
+                    "[VIDEO][ANDROID AUTO] 영상 제작 시작: "
+                    f"{local_aa_video_path}"
+                )
+                logging.info(
+                    "[ANDROID AUTO VIDEO] 영상 제작 시작: "
+                    f"{local_aa_video_path}"
+                )
                 self._create_android_auto_video(
                     frames,
                     local_aa_video_path,
@@ -1062,6 +1138,12 @@ class AndroidRecordManager:
                     output_fps=android_auto_fps
                 )
                 aa_video_created = True
+                aa_video_size = os.path.getsize(local_aa_video_path)
+
+                print(
+                    "[VIDEO][ANDROID AUTO] 영상 제작 완료: "
+                    f"{local_aa_video_path} ({aa_video_size} bytes)"
+                )
 
                 logging.info(
                     "[ANDROID AUTO VIDEO] "
