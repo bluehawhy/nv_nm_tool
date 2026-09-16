@@ -386,6 +386,7 @@ class MainWindow(QMainWindow):
         self.map_version = "Checking..."
         self.version_found_flag = False
         self.health_check_log_counter = 0
+        self.device_health_failure_count = 0
         self.version_check_log_counter = 0
         self.last_update_time = time.time()
         self.timeout_limit = 300 
@@ -765,6 +766,7 @@ class MainWindow(QMainWindow):
 
         self.device = self.devices[current_index]
         self.health_check_log_counter = 0
+        self.device_health_failure_count = 0
         self.version_check_log_counter = 0
         self.version_found_flag = False
         self.version_info.clear()
@@ -864,16 +866,33 @@ class MainWindow(QMainWindow):
             if worker in self.workers:
                 self.workers.remove(worker)
             
-            # 장치가 등록되어 있는데 헬스체크 결과가 False(또는 None)인 경우
-            if self.device is target_dev and not result:
-                logging.warning("⚠️ Device connection lost! Stopping timers and disconnecting...")
-                
-                # 🟢 [핵심 1] 6초 주기 버전 수집 타이머를 즉시 중지 (무한 재시작 방지)
-                if hasattr(self, 'timer') and self.timer.isActive():
-                    self.timer.stop()
+            if self.device is not target_dev:
+                return
 
-                # 🟢 [핵심 2] disconnect_device() 호출
-                self.disconnect_device(connection_lost=True)
+            if result:
+                self.device_health_failure_count = 0
+                return
+
+            # 순간적인 ADB 응답 지연 한 번으로 연결을 해제하지 않습니다.
+            self.device_health_failure_count = (
+                getattr(self, 'device_health_failure_count', 0) + 1
+            )
+            if self.device_health_failure_count < 3:
+                logging.warning(
+                    "Device health check failed "
+                    f"({self.device_health_failure_count}/3); retrying."
+                )
+                return
+
+            logging.warning(
+                "Device connection lost after 3 consecutive health-check failures. "
+                "Stopping timers and disconnecting..."
+            )
+
+            if hasattr(self, 'timer') and self.timer.isActive():
+                self.timer.stop()
+
+            self.disconnect_device(connection_lost=True)
 
         worker = Worker(task)
         worker.daemon = True
