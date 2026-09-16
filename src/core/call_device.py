@@ -24,6 +24,22 @@ from ..utils import loggas
 # 로거 설정
 logging = loggas.logger
 
+ADB_HOST_TIMEOUT_SECONDS = 5.0
+
+
+class TimeoutAdbClient(AdbClient):
+    """ADB host 명령이 무기한 대기하지 않도록 소켓 타임아웃을 적용합니다."""
+
+    def _execute_cmd(self, cmd, with_response=True):
+        with self.create_connection(timeout=ADB_HOST_TIMEOUT_SECONDS) as conn:
+            conn.send(cmd)
+            if with_response:
+                return conn.receive()
+
+            conn.check_status()
+            return None
+
+
 # --- [ 장치 인식 및 연결 관리 ] ---
 def check_device_from_device_mg(target_keywords={
         'Android': ['ADB Interface'],
@@ -105,16 +121,37 @@ def is_adb_server_running():
         return False
 
 def start_adb_server():
-    """ADB 서버 시작"""
+    """ADB 서버를 제한 시간 안에 시작합니다."""
     try:
         subprocess.run(
-            ["adb", "start-server"], 
-            check=True, 
+            ["adb", "start-server"],
+            check=True,
+            capture_output=True,
+            timeout=5,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
         logging.info("ADB Server started successfully.")
+        return True
     except Exception as e:
-        logging.info(f"Failed to start ADB server: {e}")
+        logging.warning(f"Failed to start ADB server: {e}")
+        return False
+
+
+def restart_adb_server():
+    """응답하지 않는 ADB 서버를 종료한 뒤 한 번만 다시 시작합니다."""
+    logging.warning("ADB 서버가 응답하지 않아 재시작합니다.")
+
+    try:
+        subprocess.run(
+            ["adb", "kill-server"],
+            capture_output=True,
+            timeout=3,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+    except Exception as e:
+        logging.debug(f"ADB 서버 종료 중 예외 (계속 진행): {e}")
+
+    return start_adb_server()
 
 def kill_all_adb():
     """실행 중인 adb.exe 프로세스 강제 종료"""
@@ -233,7 +270,7 @@ def is_device_connected(device):
 
             # pure-python-adb client 이용 -> 현재 연결된 시리얼 목록에 존재하는지 확인 (가장 빠른 방식)
             controller = ADBController(host="127.0.0.1", port=5037)
-            current_devices = controller.client.devices()
+            current_devices = controller.get_devices()
             connected_serials = [dev.serial for dev in current_devices]
             
             return target_serial in connected_serials
@@ -283,7 +320,7 @@ class AndroidConnector:
 
         devices = []
         try:
-            adb_devices = self.controller.client.devices()
+            adb_devices = self.controller.get_devices()
         except Exception as e:
             logging.error(f"Android ADB 연결 시도 중 에러: {e}")
             if 'WinError 10061' in str(e):
@@ -480,7 +517,37 @@ def discover_and_connect_device():
 class ADBController:
     """ADB 클라이언트를 관리하는 메인 관리자"""
     def __init__(self, host="localhost", port=5037):
-        self.client = AdbClient(host=host, port=port)
+        self.client = TimeoutAdbClient(host=host, port=port)
+
+    def get_devices(self, recover=True):
+        """
+        ADB 장치 목록을 타임아웃과 함께 조회합니다.
+
+        첫 조회가 실패하면 정지된 ADB 서버를 한 번 재시작하고 재시도합니다.
+        재시도도 실패하면 호출자에게 예외를 전달해 스캔이 계속 진행되게 합니다.
+        """
+        try:
+            return self.client.devices()
+        except Exception as first_error:
+            if not recover:
+                raise
+
+            logging.warning(
+                f"ADB 장치 목록 조회 실패: {first_error}"
+            )
+
+            if not restart_adb_server():
+                raise
+
+            time.sleep(0.5)
+
+            try:
+                return self.client.devices()
+            except Exception as retry_error:
+                logging.error(
+                    f"ADB 서버 재시작 후 장치 목록 조회 실패: {retry_error}"
+                )
+                raise
 
     def run_worker(self, serial_num, command):
         worker = WorkerThread(self.client, serial_num, command)
