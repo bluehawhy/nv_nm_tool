@@ -520,7 +520,7 @@ class AndroidLogManager:
     # 🚀 [통합] 추가 ADB 세션 연결 없이 메모리 버퍼 및 실시간 모니터링 활용
     def get_snapshot_logs(self, folder_path=None, duration_sec=60):
         if folder_path is None:
-            log_dir = os.path.join(self.config.get('local_path', './'), "logs", "snapshot")
+            log_dir = os.path.join(self.folder_path, "logs", "snapshot")
         else:
             log_dir = folder_path
         os.makedirs(log_dir, exist_ok=True)
