@@ -270,7 +270,7 @@ def is_device_connected(device):
 
             # pure-python-adb client 이용 -> 현재 연결된 시리얼 목록에 존재하는지 확인 (가장 빠른 방식)
             controller = ADBController(host="127.0.0.1", port=5037)
-            current_devices = controller.get_devices()
+            current_devices = controller.get_devices(recover=False)
             connected_serials = [dev.serial for dev in current_devices]
             
             return target_serial in connected_serials
@@ -322,17 +322,10 @@ class AndroidConnector:
         try:
             adb_devices = self.controller.get_devices()
         except Exception as e:
+            # ADBController.get_devices()에서 타임아웃/서버 재시작/재시도까지
+            # 이미 처리했습니다. Android 검색만 건너뛰고 다른 기기 검색을 계속합니다.
             logging.error(f"Android ADB 연결 시도 중 에러: {e}")
-            if 'WinError 10061' in str(e):
-                start_adb_server()
-                time.sleep(1)
-                try:
-                    adb_devices = self.controller.client.devices()
-                except Exception as retry_e:
-                    logging.error(f"ADB 재시작 후에도 연결 실패: {retry_e}")
-                    return []
-            else:
-                return []
+            return []
 
         for adb_obj in adb_devices:
             dev_info = {
@@ -369,7 +362,7 @@ class TWDConnector:
         
         # 1차 시도: 이미 ADB 모드로 활성화되어 있는 TWD 기기 수집
         try:
-            adb_devices = self.controller.client.devices()
+            adb_devices = self.controller.get_devices()
         except Exception:
             pass
 
@@ -382,7 +375,7 @@ class TWDConnector:
                 set_adb_mode(port)
                 time.sleep(1.5)  # 모드 전환 시간 보장
                 try:
-                    adb_devices = self.controller.client.devices()
+                    adb_devices = self.controller.get_devices()
                 except Exception as e:
                     logging.error(f"TWD 시리얼 전환 후 ADB 재시도 실패: {e}")
 
