@@ -384,6 +384,8 @@ class MainWindow(QMainWindow):
         self.sw_version = "Checking..."
         self.map_version = "Checking..."
         self.version_found_flag = False
+        self.health_check_log_counter = 0
+        self.version_check_log_counter = 0
         self.last_update_time = time.time()
         self.timeout_limit = 300 
 
@@ -687,7 +689,7 @@ class MainWindow(QMainWindow):
             self.timer_device_check.stop()
         self.is_checking_device = False
 
-        # 2. 5초 버전 체크 타이머 정지
+        # 2. 6초 버전 체크 타이머 정지
         if hasattr(self, 'timer') and self.timer is not None:
             self.timer.stop()
 
@@ -751,6 +753,8 @@ class MainWindow(QMainWindow):
             return
 
         self.device = self.devices[current_index]
+        self.health_check_log_counter = 0
+        self.version_check_log_counter = 0
         self.version_found_flag = False
         self.version_info.clear()
         self.sw_version = "Checking..."
@@ -801,7 +805,7 @@ class MainWindow(QMainWindow):
             self.set_interaction_buttons_enabled(False)
 
         self.restart_background_tasks()
-        self.timer.start(5000)
+        self.timer.start(6000)
 
         # 🟢 [수정] 기기 연결 성공 시 3초 점검 타이머 시작
         self.timer_device_check.start()
@@ -820,7 +824,10 @@ class MainWindow(QMainWindow):
         def task():
             try:
                 res = call_device.is_device_connected(target_dev)
-                logging.info(f'Health Check - {res}')
+                self.health_check_log_counter += 1
+                if self.health_check_log_counter >= 10:
+                    logging.info(f'Health Check - {res}')
+                    self.health_check_log_counter = 0
                 return res
             except Exception as e:
                 logging.info(f"[Check Task Exception] {e}")
@@ -836,7 +843,7 @@ class MainWindow(QMainWindow):
             if self.device is target_dev and not result:
                 logging.warning("⚠️ Device connection lost! Stopping timers and disconnecting...")
                 
-                # 🟢 [핵심 1] 5초 주기 버전 수집 타이머를 즉시 중지 (무한 재시작 방지)
+                # 🟢 [핵심 1] 6초 주기 버전 수집 타이머를 즉시 중지 (무한 재시작 방지)
                 if hasattr(self, 'timer') and self.timer.isActive():
                     self.timer.stop()
 
@@ -960,7 +967,10 @@ class MainWindow(QMainWindow):
                 logging.info("모든 버전 정보 수집 완료. 더 이상 스레드를 재시작하지 않습니다.")
                 self.timer.stop()
 
-        logging.info(f"업데이트 완료: SW:{self.sw_version}, Map:{self.map_version}")
+        self.version_check_log_counter += 1
+        if self.version_check_log_counter >= 10:
+            logging.info(f"업데이트 완료: SW:{self.sw_version}, Map:{self.map_version}")
+            self.version_check_log_counter = 0
         self.refresh_display()
 
     def refresh_display(self):
