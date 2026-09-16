@@ -91,8 +91,8 @@ class IOSDeviceController:
 
             folder_path = self.config.get("local_path",str(Path.home() / "Desktop" / "NKM_Tool"))
         else:
-            # 외부에서 저장 경로를 직접 전달한 경우
-            self.config["local_path"] = str(folder_path)
+            # 외부에서 저장 경로를 직접 전달한 경우에도 설정 객체를 초기화합니다.
+            self.config = {"local_path": str(folder_path)}
 
         # 기본 저장 경로
         self.base_dir = Path(folder_path)
