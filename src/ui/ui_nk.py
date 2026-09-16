@@ -742,9 +742,7 @@ class MainWindow(QMainWindow):
             self.log(message)
             logging.warning(message)
         else:
-            message = f"이 기기 연결을 해제했습니다: {device_description}"
-            self.log(message)
-            logging.info(message)
+            logging.info(f"Device disconnected: {device_description}")
 
     @staticmethod
     def _get_device_folder_name(device):
@@ -811,7 +809,11 @@ class MainWindow(QMainWindow):
         self.btn_device_connect.setText("Disconnect")
         
         self.title_label.setText(f"{self.version} - Connected: {dev_type_str}")
-        self.log(f"Connecting to device index: {current_index} ({dev_type_str})")
+        device_description = (
+            f"{selected_device.get('model', 'Unknown Device')} / "
+            f"{selected_device.get('serial', 'Unknown Serial')} / {dev_type_str}"
+        )
+        self.log(f"Connecting device: {device_description}")
 
         # 연결된 디바이스 타입에 따라 QStackedWidget 화면 갱신
         if dev_type_str == 'Android':
