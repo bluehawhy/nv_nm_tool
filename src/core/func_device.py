@@ -58,7 +58,6 @@ def update_button(res, button_name, location, config_file="resources/configs/but
     """
     # 1. 전달받은 location 디버깅 출력
     logging.info(f"[{button_name}] 업데이트 시도 좌표: {location}")
-    print(f"[{button_name}] 위치 업데이트")
     
     x_val, y_val = None, None
 
