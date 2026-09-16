@@ -442,17 +442,12 @@ class IOSDeviceController:
         skipped_count = 0
         failed_count = 0
         scanned_count = 0
-        print(f"사진 폴더 {len(sub_dirs)}개 검색 시작: {', '.join(sub_dirs)}")
-        logging.info(f"AFC 사진 폴더 검색 시작: {sub_dirs}")
+        logging.debug(f"AFC 사진 폴더 검색 시작: {sub_dirs}")
 
         for folder_index, sub_dir in enumerate(sub_dirs, start=1):
             remote_sub_path = f"{remote_base}/{sub_dir}"
 
             try:
-                print(
-                    f"[{folder_index}/{len(sub_dirs)}] "
-                    f"폴더 목록 조회 중: {remote_sub_path}"
-                )
                 photos = [
                     item
                     for item in await self._await_photo_operation(
@@ -461,10 +456,6 @@ class IOSDeviceController:
                     )
                     if item not in (".", "..")
                 ]
-                print(
-                    f"[{folder_index}/{len(sub_dirs)}] "
-                    f"{remote_sub_path}: {len(photos)}개 항목 확인"
-                )
             except Exception as e:
                 failed_count += 1
                 print(
