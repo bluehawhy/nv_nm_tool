@@ -262,15 +262,13 @@ def is_device_connected(device):
             if not adb_obj or not target_serial:
                 return False
             
-            # ADB 서버가 죽었거나 빠르게 응답하지 않는지 검사
-            if not is_adb_server_running():
-                return False
-
-            # pure-python-adb client 이용 -> 현재 연결된 시리얼 목록에 존재하는지 확인 (가장 빠른 방식)
+            # 헬스체크에서는 외부 adb 실행 파일을 다시 호출하지 않습니다.
+            # 현재 로그 수집에도 사용 중인 로컬 ADB 서버(5037)에 pure-python-adb로
+            # 직접 접속하여 대상 시리얼이 유지되는지만 확인합니다.
             controller = ADBController(host="127.0.0.1", port=5037)
             current_devices = controller.get_devices(recover=False)
             connected_serials = [dev.serial for dev in current_devices]
-            
+
             return target_serial in connected_serials
 
         # 2. Apple (iOS 장비)
