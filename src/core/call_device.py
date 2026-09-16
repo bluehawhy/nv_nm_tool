@@ -20,7 +20,6 @@ import wmi
 import uiautomator2 as u2
 
 from ..utils import loggas
-from ..utils.adb_tools import bundled_adb_command, get_bundled_adb_path
 
 # 로거 설정
 logging = loggas.logger
@@ -112,7 +111,7 @@ def is_adb_server_running():
     """ADB 서버 응답 가능 여부 확인"""
     try:
         result = subprocess.run(
-            bundled_adb_command("host-features"),
+            ["adb", "host-features"],
             capture_output=True,
             timeout=2, 
             creationflags=subprocess.CREATE_NO_WINDOW
@@ -124,15 +123,14 @@ def is_adb_server_running():
 def start_adb_server():
     """ADB 서버를 제한 시간 안에 시작합니다."""
     try:
-        adb_path = get_bundled_adb_path()
         subprocess.run(
-            [str(adb_path), "start-server"],
+            ["adb", "start-server"],
             check=True,
             capture_output=True,
             timeout=5,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
-        logging.info(f"Bundled ADB Server started successfully: {adb_path}")
+        logging.info("Local ADB server started successfully.")
         return True
     except Exception as e:
         logging.warning(f"Failed to start ADB server: {e}")
@@ -145,7 +143,7 @@ def restart_adb_server():
 
     try:
         subprocess.run(
-            bundled_adb_command("kill-server"),
+            ["adb", "kill-server"],
             capture_output=True,
             timeout=3,
             creationflags=subprocess.CREATE_NO_WINDOW
@@ -156,25 +154,25 @@ def restart_adb_server():
     return start_adb_server()
 
 def kill_all_adb():
-    """번들 ADB 클라이언트로 현재 5037 ADB 서버를 종료합니다."""
+    """로컬 ADB 클라이언트로 현재 5037 ADB 서버를 종료합니다."""
     try:
         result = subprocess.run(
-            bundled_adb_command("kill-server"),
+            ["adb", "kill-server"],
             capture_output=True,
             text=True,
             timeout=3,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
         if result.returncode == 0:
-            logging.info("Bundled ADB client stopped the ADB server.")
+            logging.info("Local ADB client stopped the ADB server.")
             return 1
 
         logging.warning(
-            f"Bundled ADB server stop failed: {result.stderr.strip()}"
+            f"Local ADB server stop failed: {result.stderr.strip()}"
         )
         return 0
     except Exception as e:
-        logging.error(f"Error during bundled ADB server stop: {e}")
+        logging.error(f"Error during local ADB server stop: {e}")
         return 0
 
 # --- [ 개별 기기 상세정보 획득 함수 (안정성 강화) ] ---
@@ -319,7 +317,7 @@ class AndroidConnector:
             return []
 
         if self.controller is None:
-            logging.error("번들 ADB 서버를 시작하지 못해 Android 검색을 건너뜁니다.")
+            logging.error("로컬 ADB 서버를 시작하지 못해 Android 검색을 건너뜁니다.")
             return []
 
         devices = []
@@ -362,7 +360,7 @@ class TWDConnector:
             return []
 
         if self.controller is None:
-            logging.error("번들 ADB 서버를 시작하지 못해 TWD 검색을 건너뜁니다.")
+            logging.error("로컬 ADB 서버를 시작하지 못해 TWD 검색을 건너뜁니다.")
             return []
 
         devices = []
