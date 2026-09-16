@@ -2,6 +2,7 @@ import sys
 import os
 import time
 from datetime import datetime
+from pathlib import Path
 
 # PyQt6 Core, GUI, Widgets 통합 임포트
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QPoint, QDate
@@ -745,6 +746,18 @@ class MainWindow(QMainWindow):
             self.log(message)
             logging.info(message)
 
+    @staticmethod
+    def _get_device_folder_name(device):
+        """UI에 표시되는 모델명을 Windows에서 안전한 저장 폴더명으로 변환합니다."""
+        display_name = str(
+            device.get('model') or device.get('serial') or 'Unknown_Device'
+        ).strip()
+        safe_name = ''.join(
+            '_' if char in '<>:"/\\|?*' else char
+            for char in display_name
+        ).rstrip('. ')
+        return safe_name or 'Unknown_Device'
+
     def connect_selected_device(self):
         """기기 연결 및 기기 타입별 뷰 포트 스위칭 로직"""
         current_index = self.combo_device.currentData()
@@ -761,25 +774,35 @@ class MainWindow(QMainWindow):
         self.map_version = "Checking..."
         self.refresh_display()
         dev_type_str = self.device.get("detected_type", "Device")
+        device_folder_name = self._get_device_folder_name(self.device)
+        device_output_dir = str(
+            Path(self.current_config['local_path']) / device_folder_name
+        )
+        os.makedirs(device_output_dir, exist_ok=True)
 
         if dev_type_str in ("Android", "twd_adb"):
             self.nav_ctrl_manager = func_device.NaviController(device=self.device)
             self.keyboard_manager = func_device.KeyboardController(device=self.device)
 
             self.and_log_manager = func_logging.AndroidLogManager(
-                device=self.device
+                device=self.device,
+                folder_path=device_output_dir,
             )
 
             self.aa_manager = func_record.AndroidRecordManager(
                 device=self.device,
-                log_manager=self.and_log_manager
+                log_manager=self.and_log_manager,
+                folder_path=device_output_dir,
             )
             self.aa_manager.start()
 
             self.and_log_manager.set_record_manager(self.aa_manager)
 
         elif dev_type_str == "Apple":
-            self.ios_device_controller = func_ios.IOSDeviceController(self.device)
+            self.ios_device_controller = func_ios.IOSDeviceController(
+                self.device,
+                folder_path=device_output_dir,
+            )
         
 
         #기존 UI 요소 비활성화 및 상태 업데이트
