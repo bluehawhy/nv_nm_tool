@@ -6,6 +6,7 @@ import time
 from contextlib import ExitStack
 from datetime import datetime
 from ..utils import configus, loggas
+from ..utils.adb_tools import bundled_adb_command
 from collections import deque
 
 
@@ -138,7 +139,12 @@ class AndroidLogManager:
             logging.debug(f"[{self.serial}] Connection socket 종료 중 예외 (이미 닫힘): {e}")
 
         try:
-            subprocess.run(["adb", "-s", self.serial, "logcat", "-c"], capture_output=True)
+            subprocess.run(
+                bundled_adb_command("-s", self.serial, "logcat", "-c"),
+                capture_output=True,
+                timeout=5,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
         except Exception:
             pass
 
