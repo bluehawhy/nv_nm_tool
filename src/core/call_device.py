@@ -20,6 +20,7 @@ import wmi
 import uiautomator2 as u2
 
 from ..utils import loggas
+from ..utils.adb_tools import bundled_adb_command, get_bundled_adb_path
 
 # 로거 설정
 logging = loggas.logger
@@ -110,27 +111,28 @@ def set_adb_mode(port):
 def is_adb_server_running():
     """ADB 서버 응답 가능 여부 확인"""
     try:
-        subprocess.run(
-            ["adb", "host-features"],
+        result = subprocess.run(
+            bundled_adb_command("host-features"),
             capture_output=True,
             timeout=2, 
             creationflags=subprocess.CREATE_NO_WINDOW
         )
-        return True
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+        return result.returncode == 0
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
         return False
 
 def start_adb_server():
     """ADB 서버를 제한 시간 안에 시작합니다."""
     try:
+        adb_path = get_bundled_adb_path()
         subprocess.run(
-            ["adb", "start-server"],
+            [str(adb_path), "start-server"],
             check=True,
             capture_output=True,
             timeout=5,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
-        logging.info("ADB Server started successfully.")
+        logging.info(f"Bundled ADB Server started successfully: {adb_path}")
         return True
     except Exception as e:
         logging.warning(f"Failed to start ADB server: {e}")
@@ -143,7 +145,7 @@ def restart_adb_server():
 
     try:
         subprocess.run(
-            ["adb", "kill-server"],
+            bundled_adb_command("kill-server"),
             capture_output=True,
             timeout=3,
             creationflags=subprocess.CREATE_NO_WINDOW
@@ -154,27 +156,25 @@ def restart_adb_server():
     return start_adb_server()
 
 def kill_all_adb():
-    """실행 중인 adb.exe 프로세스 강제 종료"""
-    command = ["taskkill", "/F", "/IM", "adb.exe", "/T"]
+    """번들 ADB 클라이언트로 현재 5037 ADB 서버를 종료합니다."""
     try:
         result = subprocess.run(
-            command,
+            bundled_adb_command("kill-server"),
             capture_output=True,
             text=True,
-            encoding='cp949',
+            timeout=3,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
-        
-        output = (result.stdout + result.stderr).upper()
-        if "SUCCESS" in output or "성공" in output:
-            logging.info("Successfully killed adb.exe processes.")
-        elif "NOT FOUND" in output or "찾을 수 없습니다" in output:
-            logging.info("No adb.exe process was running.")
-        else:
-            logging.info(f"taskkill output: {output.strip()}")
-        return 1
+        if result.returncode == 0:
+            logging.info("Bundled ADB client stopped the ADB server.")
+            return 1
+
+        logging.warning(
+            f"Bundled ADB server stop failed: {result.stderr.strip()}"
+        )
+        return 0
     except Exception as e:
-        logging.error(f"Error during taskkill: {e}")
+        logging.error(f"Error during bundled ADB server stop: {e}")
         return 0
 
 # --- [ 개별 기기 상세정보 획득 함수 (안정성 강화) ] ---
@@ -318,6 +318,10 @@ class AndroidConnector:
         if 'Android' not in categories:
             return []
 
+        if self.controller is None:
+            logging.error("번들 ADB 서버를 시작하지 못해 Android 검색을 건너뜁니다.")
+            return []
+
         devices = []
         try:
             adb_devices = self.controller.get_devices()
@@ -355,6 +359,10 @@ class TWDConnector:
 
     def connect(self, categories):
         if not any(cat in categories for cat in ['twd_com', 'twd_adb']):
+            return []
+
+        if self.controller is None:
+            logging.error("번들 ADB 서버를 시작하지 못해 TWD 검색을 건너뜁니다.")
             return []
 
         devices = []
@@ -489,7 +497,8 @@ def discover_and_connect_device():
     # 2. 공통 ADB 클라이언트 매니저 초기화
     controller = None
     if any(cat in categories for cat in ['Android', 'twd_com', 'twd_adb']):
-        controller = ADBController(host="127.0.0.1", port=5037)
+        if start_adb_server():
+            controller = ADBController(host="127.0.0.1", port=5037)
 
     # 3. 객체지향적인 커넥터 인스턴스화
     android_connector = AndroidConnector(controller)
