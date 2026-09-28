@@ -187,25 +187,54 @@ def get_detailed_devices(dev_info):
     if detected_type in ['Android', 'twd_adb']:
         adb_obj = dev_info.get('ppadb_device')
         if adb_obj:
+            serial_val = getattr(adb_obj, 'serial', 'Unknown')
+            product_name = 'Android'
+            model_name = 'Android Device (Shell Error)'
+            wm_size = 'Unknown'
+
             try:
-                product_name = adb_obj.shell("getprop ro.product.name").strip()
-                model_name = adb_obj.shell("getprop ro.product.model").strip()
-                wm_size = adb_obj.shell("wm size").strip().split(":")[-1].strip()
-                
-                detailed_data = {
-                    'serial': adb_obj.serial,
-                    'model': model_name,
-                    'product': product_name,
-                    'resolution': wm_size
-                }
+                product_name = (
+                    adb_obj.shell("getprop ro.product.name").strip()
+                    or 'Android'
+                )
             except Exception as e:
-                logging.error(f"Android/TWD 상세 정보 획득 중 에러: {e}")
-                detailed_data = {
-                    'serial': getattr(adb_obj, 'serial', 'Unknown'),
-                    'model': 'Android Device (Shell Error)',
-                    'product': 'Android',
-                    'resolution': 'Unknown'
-                }
+                logging.error(
+                    f"Android/TWD product query failed "
+                    f"(serial={serial_val}, command=getprop ro.product.name): "
+                    f"{type(e).__name__}: {e}"
+                )
+
+            try:
+                model_name = (
+                    adb_obj.shell("getprop ro.product.model").strip()
+                    or 'Android Device (Unknown Model)'
+                )
+            except Exception as e:
+                logging.error(
+                    f"Android/TWD model query failed "
+                    f"(serial={serial_val}, command=getprop ro.product.model): "
+                    f"{type(e).__name__}: {e}"
+                )
+
+            try:
+                wm_output = adb_obj.shell("wm size").strip()
+                wm_size = (
+                    wm_output.split(":")[-1].strip()
+                    if wm_output else 'Unknown'
+                )
+            except Exception as e:
+                logging.error(
+                    f"Android/TWD resolution query failed "
+                    f"(serial={serial_val}, command=wm size): "
+                    f"{type(e).__name__}: {e}"
+                )
+
+            detailed_data = {
+                'serial': serial_val,
+                'model': model_name,
+                'product': product_name,
+                'resolution': wm_size
+            }
                 
     elif detected_type == 'Apple':
         lock_device = dev_info.get('lockdown_device')

@@ -228,7 +228,10 @@ class AndroidRecordManager:
     def _save_location_txt(
         self,
         car_pos_path,
-        loca_log=True
+        loca_log=True,
+        wait_for_new_car_pos=False,
+        car_pos_sequence=None,
+        timeout_seconds=1.0,
     ):
         """
         스크린샷 및 비디오 녹화에서 공통으로 사용되는 위치 로그 저장 내장 함수.
@@ -245,8 +248,32 @@ class AndroidRecordManager:
                 f.write("car_pos: N/A (LogManager is None)")
             return
 
-        # log_manager의 메모리 변수 추출
-        latest_data = getattr(self.log_manager, 'latest_car_pos', None)
+        if wait_for_new_car_pos:
+            if car_pos_sequence is None:
+                car_pos_sequence = self.log_manager.get_car_pos_sequence()
+
+            logging.info(
+                f"[CAR_POS WAIT] after_sequence={car_pos_sequence} "
+                f"timeout={timeout_seconds:.1f}s"
+            )
+            latest_data = self.log_manager.wait_for_car_pos_after(
+                car_pos_sequence,
+                timeout_seconds=timeout_seconds,
+            )
+
+            if not latest_data:
+                logging.warning(
+                    f"[CAR_POS WAIT TIMEOUT] No new NVS_MV received "
+                    f"within {timeout_seconds:.1f}s after screenshot request."
+                )
+                with open(car_pos_path, "w", encoding="utf-8") as f:
+                    f.write(
+                        "car_pos: N/A "
+                        f"(No new NVS_MV within {timeout_seconds:.1f}s after screenshot request)"
+                    )
+                return
+        else:
+            latest_data = getattr(self.log_manager, 'latest_car_pos', None)
 
         logging.info(
             f"[CAR_POS READ] "
@@ -416,6 +443,10 @@ class AndroidRecordManager:
         - Android Auto 화면도 추가 캡처
         """
 
+        car_pos_sequence = None
+        if loca_log and self.log_manager:
+            car_pos_sequence = self.log_manager.get_car_pos_sequence()
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         screenshot_file = (f"Screenshot_{timestamp}.png")
@@ -433,7 +464,9 @@ class AndroidRecordManager:
 
         self._save_location_txt(
             car_pos_path,
-            loca_log=loca_log
+            loca_log=loca_log,
+            wait_for_new_car_pos=True,
+            car_pos_sequence=car_pos_sequence,
         )
 
         # -----------------------------------------------------

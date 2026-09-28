@@ -12,6 +12,28 @@ from collections import deque
 
 logging = loggas.logger
 
+def cleanup_expired_log_files(base_path, max_age_days=3):
+    """Delete expired *.log files directly inside logs directories."""
+    cutoff_time = time.time() - (max_age_days * 24 * 60 * 60)
+
+    for root, _, file_names in os.walk(base_path):
+        if os.path.basename(root).lower() != "logs":
+            continue
+
+        for file_name in file_names:
+            if not file_name.lower().endswith(".log"):
+                continue
+
+            log_path = os.path.join(root, file_name)
+            try:
+                if os.path.getmtime(log_path) < cutoff_time:
+                    os.remove(log_path)
+                    logging.info(f"Deleted expired log file: {log_path}")
+            except OSError as e:
+                logging.warning(
+                    f"Failed to delete expired log file {log_path}: {e}"
+                )
+
 # logcat 소켓은 임의의 바이트 경계에서 잘릴 수 있으므로 완성된 로그 줄에서만
 # 위치를 판별한다. win 번호/공백/대소문자는 기기 및 빌드별 차이를 허용한다.
 CAR_POS_PATTERN = re.compile(
@@ -97,6 +119,7 @@ class AndroidLogManager:
         self.folder_path = folder_path
         self.log_dir = os.path.join(self.folder_path, "logs")
         os.makedirs(self.log_dir, exist_ok=True)
+        cleanup_expired_log_files(self.folder_path)
 
         # 실시간 수집 상태 관리 변수
         self.file_count = 0
@@ -109,6 +132,8 @@ class AndroidLogManager:
         # 스레드 통신용 이벤트 및 락
         self.stop_event = None
         self.lock = threading.Lock()
+        self._car_pos_condition = threading.Condition(self.lock)
+        self._car_pos_sequence = 0
         self._lifecycle_lock = threading.Lock()
         self._log_thread = None
         self._active_connection = None
@@ -123,6 +148,37 @@ class AndroidLogManager:
 
     def set_record_manager(self, record_manager):
         self.record_manager = record_manager
+
+    def clear_logcat_buffer_for_new_connection(self):
+        """Clear device logcat once before collecting logs for a new connection."""
+        try:
+            self.device_obj.shell("logcat -c")
+            logging.info(
+                f"[{self.serial}] Cleared existing logcat buffer for new connection."
+            )
+            return True
+        except Exception as e:
+            logging.warning(
+                f"[{self.serial}] Failed to clear logcat buffer for new connection: "
+                f"{type(e).__name__}: {e}"
+            )
+            return False
+
+    def get_car_pos_sequence(self):
+        with self.lock:
+            return self._car_pos_sequence
+
+    def wait_for_car_pos_after(self, sequence, timeout_seconds=1.0):
+        deadline = time.monotonic() + timeout_seconds
+
+        with self._car_pos_condition:
+            while self._car_pos_sequence <= sequence:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self._car_pos_condition.wait(remaining)
+
+            return self.latest_car_pos
 
     def close_connection_by_error(self):
         """UI단 또는 외부에 의해 에러가 감지되었을 때 수집 스레드 및 커넥션을 완전히 강제 종료합니다."""
@@ -375,16 +431,20 @@ class AndroidLogManager:
                                 (self._log_sequence, time.time(), clean_line)
                             )
 
-                        # 2. 최신 위치 로그는 즉시 갱신
+                        # 2. 최신 위치 로그는 즉시 갱신하고, 대기 중인
+                        # 스크린샷 작업에 새 NVS_MV 도착을 알린다.
                         if CAR_POS_PATTERN.search(clean_line):
                             pc_time = datetime.now().strftime(
                                 "%H:%M:%S.%f"
                             )[:-3]
 
-                            self.latest_car_pos = (
-                                pc_time,
-                                clean_line
-                            )
+                            with self._car_pos_condition:
+                                self._car_pos_sequence += 1
+                                self.latest_car_pos = (
+                                    pc_time,
+                                    clean_line
+                                )
+                                self._car_pos_condition.notify_all()
 
                         # 3. 패턴 작업
                         self._process_pattern_jobs(clean_line)

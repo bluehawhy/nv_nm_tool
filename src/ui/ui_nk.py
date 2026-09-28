@@ -427,6 +427,7 @@ class MainWindow(QMainWindow):
 
 
         self.log(f"--- GUI Started ---")
+        self.log(f"current folder : {self.current_config['local_path']}")
         self.refresh_display()       # "Checking..." 상태로 화면 표시
 
         logging.info(f"[Check Point 4] UI 초기화: {time.time() - t3:.3f}s")
@@ -795,6 +796,7 @@ class MainWindow(QMainWindow):
             self.aa_manager.start()
 
             self.and_log_manager.set_record_manager(self.aa_manager)
+            self.and_log_manager.clear_logcat_buffer_for_new_connection()
 
         elif dev_type_str == "Apple":
             self.ios_device_controller = func_ios.IOSDeviceController(
@@ -1228,15 +1230,15 @@ class MainWindow(QMainWindow):
     #apple device 관련 버튼 액션
     def cmd_apple_screenshot(self):
         if self.device is None:
-            self.log("[Error] Apple 기기가 연결되지 않았습니다.")
+            self.log("[Error] Apple device is not connected.")
             return
 
         if self.device.get("detected_type") != "Apple":
-            self.log("[Error] 현재 연결된 기기는 Apple 기기가 아닙니다.")
+            self.log("[Error] The connected device is not an Apple device.")
             return
 
         if self.ios_device_controller is None:
-            self.log("[Error] Apple 컨트롤러가 초기화되지 않았습니다.")
+            self.log("[Error] Apple controller is not initialized.")
             return
 
         self.run_task(
@@ -1257,7 +1259,7 @@ class MainWindow(QMainWindow):
             return
 
         target_date = self._convert_apple_date(date)
-        self.log(f"[Apple] {target_date} 사진 다운로드를 시작합니다.")
+        self.log(f"[Apple] Starting photo download for {target_date}.")
 
         self.run_task(
             self.ios_device_controller.download_photos_by_date,
@@ -1271,7 +1273,7 @@ class MainWindow(QMainWindow):
             return
 
         target_date = self._convert_apple_date(date)
-        self.log(f"[Apple] {target_date} Crash Dump 다운로드를 시작합니다.")
+        self.log(f"[Apple] Starting crash dump download for {target_date}.")
 
         self.run_task(
             self.ios_device_controller.get_crash_logs,
@@ -1285,7 +1287,7 @@ class MainWindow(QMainWindow):
             return
 
         target_date = self._convert_apple_date(date)
-        self.log(f"[Apple] {target_date} 앱 로그 다운로드를 시작합니다.")
+        self.log(f"[Apple] Starting app log download for {target_date}.")
 
         self.run_task(
             self.ios_device_controller.download_filtered_logs,
